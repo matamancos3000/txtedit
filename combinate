@@ -1,31 +1,18 @@
 import os
 
-# Directorio donde están los archivos TXT
-input_folder = "ruta/a/tu/carpeta"  # Cambia esto por la ruta a tu carpeta de archivos
-output_file = "folios_unidos.txt"  # Nombre del archivo de salida
+def unir_folios(carpeta_entrada, archivo_salida):
+    with open(archivo_salida, 'w') as salida:
+        for archivo in os.listdir(carpeta_entrada):
+            if archivo.endswith('.txt'):
+                ruta_archivo = os.path.join(carpeta_entrada, archivo)
+                with open(ruta_archivo, 'r') as entrada:
+                    for linea in entrada:
+                        salida.write(linea)  # Escribe cada línea con salto de línea original
 
-# Lista para almacenar todos los folios
-all_folios = []
+    print(f"Archivos combinados en {archivo_salida}")
 
-# Verifica que la carpeta de entrada exista
-if not os.path.exists(input_folder):
-    print(f"La carpeta {input_folder} no existe.")
-else:
-    # Recorrer todos los archivos en la carpeta
-    for filename in os.listdir(input_folder):
-        # Procesar solo archivos .txt
-        if filename.endswith(".txt"):
-            file_path = os.path.join(input_folder, filename)
-            
-            # Leer el contenido del archivo y agregarlo a la lista
-            with open(file_path, "r") as file:
-                folios = file.readlines()
-                all_folios.extend(folios)
+# Cambia estas rutas según tus carpetas
+carpeta_entrada = 'ruta/a/carpeta/con/archivos'
+archivo_salida = 'ruta/a/carpeta_salida/folios_unidos.txt'
 
-    # Guardar todos los folios en el archivo de salida
-    # Se asegura que el archivo se guarde en la misma carpeta del script
-    output_path = os.path.join(os.getcwd(), output_file)
-    with open(output_path, "w") as output:
-        output.writelines(all_folios)
-
-    print(f"Archivo '{output_file}' creado con éxito en la carpeta del script, con todos los folios combinados.")
+unir_folios(carpeta_entrada, archivo_salida)
