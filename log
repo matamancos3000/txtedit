@@ -1,0 +1,28 @@
+import time
+from collections import deque
+
+# Ruta del archivo .log
+file_path = '/ruta/del/archivo.log'
+
+# Número de líneas que queremos mostrar al inicio
+last_n_lines = 10
+
+# Lee las últimas `last_n_lines` líneas del archivo
+with open(file_path, 'r') as file:
+    # Lee todas las líneas y guarda solo las últimas 10
+    last_lines = deque(file, maxlen=last_n_lines)
+
+# Muestra las últimas `last_n_lines` líneas al inicio
+for line in last_lines:
+    print(line, end='')
+
+# Abre el archivo en modo "seguir" para ver las líneas en tiempo real
+with open(file_path, 'r') as file:
+    # Mueve el cursor al final del archivo
+    file.seek(0, 2)
+    while True:
+        line = file.readline()
+        if not line:
+            time.sleep(0.1)
+            continue
+        print(line, end='')
