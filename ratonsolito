@@ -1,0 +1,19 @@
+import pyautogui
+import time
+
+def mantener_activo(intervalo=60):
+    """
+    Evita que el equipo se bloquee moviendo el ratón cada cierto tiempo.
+    :param intervalo: Tiempo en segundos entre movimientos.
+    """
+    try:
+        print("El programa está corriendo. Presiona Ctrl+C para detenerlo.")
+        while True:
+            pyautogui.move(1, 0)  # Mueve el cursor 1 píxel a la derecha
+            pyautogui.move(-1, 0)  # Mueve el cursor 1 píxel a la izquierda
+            time.sleep(intervalo)
+    except KeyboardInterrupt:
+        print("Programa detenido.")
+
+if __name__ == "__main__":
+    mantener_activo(intervalo=60)
