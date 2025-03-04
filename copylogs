@@ -1,0 +1,32 @@
+import shutil
+import time
+import os
+
+# Definir rutas de los archivos fuente
+source_files = {
+    "DEV": r"C:\temp\DEV\log.csv",
+    "UAT": r"C:\temp\UAT\log.csv",
+    "PROD": r"C:\temp\PROD\log.csv"
+}
+
+# Definir la carpeta de destino
+destination_folder = r"C:\Copialogs"
+
+# Crear la carpeta de destino si no existe
+if not os.path.exists(destination_folder):
+    os.makedirs(destination_folder)
+
+def copy_logs():
+    for env, src in source_files.items():
+        dest = os.path.join(destination_folder, f"{env}log.csv")
+        try:
+            shutil.copy2(src, dest)  # Copia con metadatos preservados
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Copiado: {src} -> {dest}")
+        except Exception as e:
+            print(f"Error al copiar {src}: {e}")
+
+if __name__ == "__main__":
+    while True:
+        copy_logs()
+        print("Esperando 15 minutos para la próxima copia...")
+        time.sleep(900)  # Espera 900 segundos (15 minutos)
