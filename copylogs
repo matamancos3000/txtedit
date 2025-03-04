@@ -18,15 +18,20 @@ dest_path = "C:/Copialogs"
 def copiar_logs():
     mes_actual = datetime.now().strftime("%m")  # Número del mes
     anio_actual = datetime.now().strftime("%Y")
-    mes_nombre = datetime.now().strftime("%B")  # Nombre del mes en español
+    mes_nombre = datetime.now().strftime("%B").upper()  # Nombre del mes en español
     
     for entorno, ruta_base in entornos.items():
-        source_file = f"{ruta_base}/{anio_actual}/{mes_nombre}/log.csv"
+        source_file = f"{ruta_base}/Output/Log/{anio_actual}/{mes_nombre}/log.csv"
+        temp_file = f"{dest_path}/{mes_actual}-{anio_actual}-{entorno}log.tmp"
         dest_file = f"{dest_path}/{mes_actual}-{anio_actual}-{entorno}log.csv"
         
         if os.path.exists(source_file):
-            shutil.copy2(source_file, dest_file)
-            print(f"{datetime.now()} - Copiado: {source_file} -> {dest_file}")
+            try:
+                shutil.copy2(source_file, temp_file)  # Copiar a archivo temporal
+                os.replace(temp_file, dest_file)  # Renombrar el archivo temporal al destino final
+                print(f"{datetime.now()} - Copiado: {source_file} -> {dest_file}")
+            except PermissionError:
+                print(f"{datetime.now()} - No se pudo copiar {source_file} porque está en uso.")
         else:
             print(f"{datetime.now()} - No se encontró: {source_file}")
 
