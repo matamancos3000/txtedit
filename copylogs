@@ -1,7 +1,11 @@
 import shutil
 import os
 import time
+import locale
 from datetime import datetime
+
+# Configurar la localización en español
+locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")
 
 # Rutas de los archivos fuente y destino
 entornos = {
