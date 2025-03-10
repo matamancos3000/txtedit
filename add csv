@@ -2,7 +2,7 @@ import pandas as pd
 import os
 
 # Ruta de la carpeta donde están los archivos CSV
-folder_path = "C:/ruta/de/tu/carpeta"
+folder_path = "C:/Copialogs"
 
 # Obtener todos los archivos CSV de la carpeta
 files = [f for f in os.listdir(folder_path) if f.endswith('.csv')]
