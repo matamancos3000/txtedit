@@ -1,14 +1,14 @@
 import pandas as pd
 import os
 
-# Ruta de la carpeta donde se almacenan los CSV
+# Ruta de la carpeta donde están los archivos CSV
 folder_path = "C:/ruta/de/tu/carpeta"
 
 # Obtener todos los archivos CSV de la carpeta
 files = [f for f in os.listdir(folder_path) if f.endswith('.csv')]
 
-# Cargar y concatenar todos los archivos CSV en un solo DataFrame
-df_list = [pd.read_csv(os.path.join(folder_path, f)) for f in files]
+# Cargar y concatenar los archivos CSV, forzando la codificación adecuada
+df_list = [pd.read_csv(os.path.join(folder_path, f), encoding="latin1") for f in files]
 df = pd.concat(df_list, ignore_index=True)
 
 # Mostrar el DataFrame en Power BI
