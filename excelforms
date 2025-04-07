@@ -1,4 +1,4 @@
-=" " & DIA(H2) & " " & ELEGIR(MES(H2);"enero";"febrero";"marzo";"abril";"mayo";"junio";"julio";"agosto";"septiembre";"octubre";"noviembre";"diciembre")
+=" " & EXTRAE(H2,1,2) & " " & ELEGIR(VALOR(EXTRAE(H2,4,2)),"enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre")
 
 
 =TEXTO(A1;"d mmmm")
