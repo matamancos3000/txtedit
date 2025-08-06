@@ -9,3 +9,7 @@ TIME(
    VALOR(EXTRAE(EXTRAE(I2, ENCONTRAR(" ", I2, ENCONTRAR(" ", I2, ENCONTRAR(" ", I2) + 1) + 1) + 1, 5), ENCONTRAR(":", EXTRAE(I2, ENCONTRAR(" ", I2, ENCONTRAR(" ", I2, ENCONTRAR(" ", I2) + 1) + 1) + 1, 5)) + 1, 2)),  // Minutos
    0  // Segundos
 )
+
+
+
+=HORA(VALOR(O2) + SI(Q2="PM", SI(VALOR(O2)<12,12,0), SI(VALOR(O2)=12,-12,0)), VALOR(P2), 0)
