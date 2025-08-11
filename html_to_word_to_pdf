@@ -1,0 +1,38 @@
+import os
+import win32com.client as win32
+
+# Ruta de la carpeta con los HTML
+carpeta_html = r"C:\Users\Erick Baez\Documents\html a pdf"
+carpeta_salida = r"C:\Users\Erick Baez\Documents\html a pdf\salida"
+
+# Crear carpeta de salida si no existe
+os.makedirs(carpeta_salida, exist_ok=True)
+
+# Iniciar Word
+word = win32.Dispatch('Word.Application')
+word.Visible = False  # No mostrar ventana
+
+for archivo in os.listdir(carpeta_html):
+    if archivo.lower().endswith(".htm") or archivo.lower().endswith(".html"):
+        ruta_html = os.path.join(carpeta_html, archivo)
+        nombre_base = os.path.splitext(archivo)[0]
+
+        print(f"Procesando: {archivo}")
+
+        # Abrir HTML en Word
+        doc = word.Documents.Open(ruta_html)
+
+        # Guardar como DOCX
+        ruta_docx = os.path.join(carpeta_salida, f"{nombre_base}.docx")
+        doc.SaveAs(ruta_docx, FileFormat=16)  # 16 = wdFormatDocumentDefault
+
+        # Guardar como PDF
+        ruta_pdf = os.path.join(carpeta_salida, f"{nombre_base}.pdf")
+        doc.SaveAs(ruta_pdf, FileFormat=17)  # 17 = wdFormatPDF
+
+        doc.Close()
+
+# Cerrar Word
+word.Quit()
+
+print("✅ Conversión completada")
