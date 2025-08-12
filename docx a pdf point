@@ -1,115 +1,127 @@
 import os
 import win32com.client as win32
 import re
-from urllib.parse import quote
 from pathlib import Path
+import urllib.parse
 
-# Configuración de rutas
+# Configuración
 CARPETA_HTML = Path(r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos")
 CARPETA_SALIDA = Path(r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos\salida")
 URL_SHAREPOINT = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20compartidos/Carpeta/"
 
-# Crear carpeta de salida si no existe
+# Crear carpeta de salida
 CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)
 
-def procesar_html(html_path):
-    """Procesa el archivo HTML y ajusta rutas para Word"""
-    with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
-        contenido = f.read()
-    
+def reparar_ruta_imagen(html_path, ruta_img):
+    """Convierte rutas de imágenes a formato absoluto que Word pueda entender"""
     html_dir = html_path.parent
     html_name = html_path.stem
     
-    # 1. Actualizar enlaces .htm/.html a PDFs en SharePoint
-    patron_href = r'(href=["\'])((?!https?://|mailto:)[^"\']*\.htm[l]?)(["\'])'
-    def actualizar_href(match):
-        prefijo, nombre_archivo, sufijo = match.group(1), match.group(2), match.group(3)
-        if not nombre_archivo.startswith(('http://', 'https://', 'mailto:')):
-            nombre_base = Path(nombre_archivo).stem
-            return f'{prefijo}{URL_SHAREPOINT}{quote(nombre_base)}.pdf{sufijo}'
-        return match.group(0)
+    # Caso 1: Ruta relativa directa (ej: "imagen.jpg")
+    if not any(sep in ruta_img for sep in ('/', '\\')):
+        img_path = html_dir / ruta_img
     
-    contenido = re.sub(patron_href, actualizar_href, contenido, flags=re.IGNORECASE)
+    # Caso 2: Ruta en carpeta _archivos (ej: "IT-CC-05_archivos/image001.jpg")
+    elif '_archivos' in ruta_img.lower() or 'image' in ruta_img.lower():
+        parts = [p for p in ruta_img.replace('\\', '/').split('/') if p]
+        img_name = parts[-1]
+        img_path = html_dir / f"{html_name}_archivos" / img_name
     
-    # 2. Ajustar rutas de imágenes en la carpeta _archivos
-    patron_img = r'(src=["\'])((?!https?://|data:)[^"\']*\.(?:jpg|jpeg|png|gif|bmp|svg|webp|ico))(["\'])'
-    def actualizar_img(match):
-        prefijo, ruta_img, sufijo = match.group(1), match.group(2), match.group(3)
-        
-        if ruta_img.startswith(('http://', 'https://', 'data:')):
-            return match.group(0)
-            
-        # Manejar rutas relativas a la carpeta _archivos
-        if '_archivos' in ruta_img or 'image' in ruta_img.lower():
-            # Construir ruta completa a la imagen
-            img_path = html_dir / f"{html_name}_archivos" / Path(ruta_img).name
-            
-            if img_path.exists():
-                # Formato que Word entiende (ruta absoluta)
-                return f'{prefijo}file:///{img_path.resolve().as_posix()}{sufijo}'
-            else:
-                print(f"  [!] Imagen no encontrada: {img_path}")
-        
-        return match.group(0)
+    # Caso 3: Ruta relativa con subdirectorios (ej: "assets/imagen.jpg")
+    else:
+        img_path = html_dir / ruta_img
     
-    contenido = re.sub(patron_img, actualizar_img, contenido, flags=re.IGNORECASE)
+    # Verificar existencia y convertir a formato Word
+    if img_path.exists():
+        # Formato file:/// para Word (ruta absoluta en formato URI)
+        return f"file:///{urllib.parse.quote(str(img_path.resolve()).replace('\\', '/'))}"
+    
+    # Diagnóstico si no se encuentra
+    print(f"\n[DIAGNÓSTICO] No se encontró la imagen: {ruta_img}")
+    print(f"Buscó en: {img_path}")
+    print(f"Archivos en la carpeta: {list(html_dir.glob('*'))}")
+    if '_archivos' in ruta_img.lower():
+        archivos_dir = html_dir / f"{html_name}_archivos"
+        if archivos_dir.exists():
+            print(f"Archivos en {archivos_dir}: {list(archivos_dir.glob('*'))}")
+        else:
+            print(f"¡La carpeta {archivos_dir} no existe!")
+    
+    return ruta_img  # Si no se encuentra, mantener original
+
+def procesar_html(html_path):
+    """Procesa el HTML y repara rutas de imágenes"""
+    with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
+        contenido = f.read()
+    
+    # Actualizar enlaces a PDF en SharePoint
+    contenido = re.sub(
+        r'href=["\']([^"\']*\.htm[l]?)["\']',
+        lambda m: f'href="{URL_SHAREPOINT}{urllib.parse.quote(Path(m.group(1)).stem)}.pdf"',
+        contenido,
+        flags=re.IGNORECASE
+    )
+    
+    # Reparar rutas de imágenes
+    contenido = re.sub(
+        r'src=["\']([^"\']*\.(?:jpg|jpeg|png|gif|bmp|svg|webp|ico))["\']',
+        lambda m: f'src="{reparar_ruta_imagen(html_path, m.group(1))}"',
+        contenido,
+        flags=re.IGNORECASE
+    )
     
     return contenido
 
-def convertir_a_word_pdf(html_path, output_dir):
-    """Convierte el archivo HTML a Word y PDF"""
+def convertir_archivo(html_path):
+    """Convierte un archivo HTML a Word y PDF"""
     nombre_base = html_path.stem
-    temp_html = output_dir / f"temp_{html_path.name}"
+    temp_html = CARPETA_SALIDA / f"temp_{html_path.name}"
     
     try:
-        # Procesar y guardar HTML temporal
+        # Paso 1: Procesar HTML
         contenido = procesar_html(html_path)
         temp_html.write_text(contenido, encoding='utf-8')
         
-        # Iniciar Word
-        word = win32.DispatchEx('Word.Application')  # Nueva instancia independiente
+        # Paso 2: Convertir con Word
+        word = win32.DispatchEx('Word.Application')
         word.Visible = False
         
         try:
-            # Convertir a Word (usando OpenXML para mejor compatibilidad)
             doc = word.Documents.Open(str(temp_html))
             
-            # Actualizar campos y vínculos
+            # Forzar actualización de campos y vínculos
             word.ActiveDocument.Fields.Update()
+            word.ActiveDocument.Reload()
             
-            # Guardar como DOCX
-            docx_path = output_dir / f"{nombre_base}.docx"
-            doc.SaveAs(str(docx_path), FileFormat=16)  # wdFormatDocumentDefault
-            
-            # Guardar como PDF
-            pdf_path = output_dir / f"{nombre_base}.pdf"
-            doc.SaveAs(str(pdf_path), FileFormat=17)  # wdFormatPDF
+            # Guardar resultados
+            doc.SaveAs(str(CARPETA_SALIDA / f"{nombre_base}.docx"), FileFormat=16)
+            doc.SaveAs(str(CARPETA_SALIDA / f"{nombre_base}.pdf"), FileFormat=17)
             
             doc.Close()
             return True
-        except Exception as e:
-            print(f"  [!] Error en Word: {str(e)}")
-            return False
         finally:
             word.Quit()
     except Exception as e:
-        print(f"  [!] Error general: {str(e)}")
+        print(f"Error al convertir {html_path.name}: {str(e)}")
         return False
     finally:
         if temp_html.exists():
             temp_html.unlink()
 
-# Procesar todos los archivos HTML/HTM
-print("Iniciando conversión de archivos guardados como página web completa...")
-exitosos = 0
+# Proceso principal
+print("Iniciando conversión con diagnóstico mejorado...")
 
 for html_file in CARPETA_HTML.glob("*.[hH][tT][mM]*"):
-    print(f"\nProcesando: {html_file.name}")
+    print(f"\n● Procesando: {html_file.name}")
     
-    if convertir_a_word_pdf(html_file, CARPETA_SALIDA):
-        print(f"  ✔ Convertido: {html_file.stem}.docx/pdf")
-        exitosos += 1
+    if convertir_archivo(html_file):
+        print(f"  ✅ Conversión exitosa")
     else:
-        print(f"  ✖ Falló la conversión: {html_file.name}")
+        print(f"  ❌ Falló la conversión")
+        
+    # Guardar HTML modificado para diagnóstico
+    debug_html = CARPETA_SALIDA / f"DEBUG_{html_file.name}"
+    debug_html.write_text(procesar_html(html_file), encoding='utf-8')
+    print(f"  🔍 HTML modificado guardado en: {debug_html}")
 
-print(f"\nProceso completado. Archivos exitosos: {exitosos}/{len(list(CARPETA_HTML.glob('*.[hH][tT][mM]*')))}")
+print("\nProceso completado. Revise los archivos DEBUG_*.htm para ver las rutas generadas.")
