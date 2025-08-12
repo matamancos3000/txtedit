@@ -15,21 +15,24 @@ os.makedirs(carpeta_salida, exist_ok=True)
 
 def actualizar_enlaces(contenido):
     """
-    Actualiza los enlaces .htm/.html para que apunten a PDFs en SharePoint,
-    excluyendo enlaces a imágenes y otros recursos.
+    Actualiza solo los enlaces .htm/.html para que apunten a PDFs en SharePoint,
+    sin modificar enlaces a imágenes ni otros recursos.
     """
-    # Patrón para encontrar href que apunten a archivos .htm/.html pero no a imágenes
-    patron = r'href=["\']((?!.*\.(jpg|jpeg|png|gif|bmp|svg|webp|ico))[^"\']+\.htm[l]?)["\']'
+    # Patrón para encontrar href que apunten a archivos .htm/.html locales
+    patron = r'(href=["\'])((?!https?://|mailto:)[^"\']*\.htm[l]?)(["\'])'
     
     def reemplazar_enlace(match):
-        nombre_archivo = match.group(1)
-        nombre_base = os.path.splitext(nombre_archivo)[0]
+        # Extraer partes del match
+        prefijo = match.group(1)
+        nombre_archivo = match.group(2)
+        sufijo = match.group(3)
         
-        # Codificar caracteres especiales para URL
-        nombre_codificado = quote(f"{nombre_base}.pdf")
-        
-        # Construir URL completa de SharePoint
-        return f'href="{url_base_sharepoint}{nombre_codificado}"'
+        # Solo procesar si no es una URL completa y es .htm/.html
+        if not nombre_archivo.startswith(('http://', 'https://', 'mailto:')):
+            nombre_base = os.path.splitext(nombre_archivo)[0]
+            nombre_codificado = quote(f"{nombre_base}.pdf")
+            return f'{prefijo}{url_base_sharepoint}{nombre_codificado}{sufijo}'
+        return match.group(0)
     
     return re.sub(patron, reemplazar_enlace, contenido, flags=re.IGNORECASE)
 
