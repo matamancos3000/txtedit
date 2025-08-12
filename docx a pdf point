@@ -3,103 +3,123 @@ import win32com.client as win32
 import re
 from urllib.parse import quote
 from pathlib import Path
+import sys
 
-# Configuración de rutas
-carpeta_html = r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos"
-carpeta_salida = r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos\salida"
-url_base_sharepoint = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20compartidos/Carpeta/"
+# Configuración de rutas (ajusta según tu necesidad)
+CARPETA_HTML = Path(r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos")
+CARPETA_SALIDA = Path(r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos\salida")
+URL_SHAREPOINT = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20compartidos/Carpeta/"
 
 # Crear carpeta de salida si no existe
-os.makedirs(carpeta_salida, exist_ok=True)
+CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)
 
-def actualizar_enlaces(contenido, html_path):
-    """
-    Actualiza los enlaces .htm/.html para SharePoint y ajusta rutas de imágenes locales
-    """
-    # Convertir rutas a objetos Path para mejor manejo
-    html_dir = Path(html_path).parent
-    
-    # Patrón para encontrar href que apunten a archivos .htm/.html locales
-    patron_href = r'(href=["\'])((?!https?://|mailto:)[^"\']*\.htm[l]?)(["\'])'
-    
-    def reemplazar_enlace(match):
-        prefijo = match.group(1)
-        nombre_archivo = match.group(2)
-        sufijo = match.group(3)
-        
-        if not nombre_archivo.startswith(('http://', 'https://', 'mailto:')):
-            nombre_base = os.path.splitext(nombre_archivo)[0]
-            nombre_codificado = quote(f"{nombre_base}.pdf")
-            return f'{prefijo}{url_base_sharepoint}{nombre_codificado}{sufijo}'
-        return match.group(0)
-    
-    # Actualizar enlaces HTML a PDF
-    contenido = re.sub(patron_href, reemplazar_enlace, contenido, flags=re.IGNORECASE)
-    
-    # Patrón para encontrar src de imágenes locales
-    patron_img = r'(src=["\'])((?!https?://|data:)[^"\']*\.(jpg|jpeg|png|gif|bmp|svg|webp|ico))(["\'])'
-    
-    def ajustar_ruta_imagen(match):
-        prefijo = match.group(1)
-        ruta_imagen = match.group(2)
-        sufijo = match.group(4)
-        
-        if not ruta_imagen.startswith(('http://', 'https://', 'data:')):
-            # Convertir ruta relativa a absoluta
-            ruta_absoluta = (html_dir / ruta_imagen).resolve()
-            
-            # Para Word, necesitamos la ruta como file:///
-            return f'{prefijo}file:///{ruta_absoluta.as_posix()}{sufijo}'
-        return match.group(0)
-    
-    # Actualizar rutas de imágenes
-    return re.sub(patron_img, ajustar_ruta_imagen, contenido, flags=re.IGNORECASE)
-
-# Iniciar Word
-word = win32.Dispatch('Word.Application')
-word.Visible = False
-
-for archivo in os.listdir(carpeta_html):
-    if archivo.lower().endswith((".htm", ".html")):
-        ruta_html = os.path.join(carpeta_html, archivo)
-        nombre_base = os.path.splitext(archivo)[0]
-
-        print(f"Procesando: {archivo}")
-
+def detectar_encoding(archivo):
+    """Intenta detectar el encoding del archivo HTML"""
+    encodings = ['utf-8', 'iso-8859-1', 'windows-1252']
+    for enc in encodings:
         try:
-            # Leer y actualizar contenido
-            with open(ruta_html, 'r', encoding='utf-8', errors='ignore') as f:
-                contenido = f.read()
-            
-            contenido_actualizado = actualizar_enlaces(contenido, ruta_html)
+            with open(archivo, 'r', encoding=enc) as f:
+                f.read()
+            return enc
+        except UnicodeDecodeError:
+            continue
+    return 'utf-8'  # Por defecto si no se puede detectar
 
-            # Guardar temporalmente
-            ruta_temp = os.path.join(carpeta_salida, f"temp_{archivo}")
-            with open(ruta_temp, 'w', encoding='utf-8') as f:
-                f.write(contenido_actualizado)
+def procesar_html(html_path):
+    """Procesa el archivo HTML y ajusta rutas"""
+    encoding = detectar_encoding(html_path)
+    
+    with open(html_path, 'r', encoding=encoding, errors='replace') as f:
+        contenido = f.read()
+    
+    html_dir = html_path.parent
+    
+    # 1. Actualizar enlaces .htm/.html a PDFs en SharePoint
+    patron_href = r'(href=["\'])((?!https?://|mailto:)[^"\']*\.htm[l]?)(["\'])'
+    def actualizar_href(match):
+        prefijo, nombre_archivo, sufijo = match.group(1), match.group(2), match.group(3)
+        if not nombre_archivo.startswith(('http://', 'https://', 'mailto:')):
+            nombre_base = Path(nombre_archivo).stem
+            return f'{prefijo}{URL_SHAREPOINT}{quote(nombre_base)}.pdf{sufijo}'
+        return match.group(0)
+    
+    contenido = re.sub(patron_href, actualizar_href, contenido, flags=re.IGNORECASE)
+    
+    # 2. Ajustar rutas de imágenes locales (solo si existen)
+    patron_img = r'(src=["\'])((?!https?://|data:)[^"\']*\.(?:jpg|jpeg|png|gif|bmp|svg|webp|ico))(["\'])'
+    def actualizar_img(match):
+        prefijo, ruta_img, sufijo = match.group(1), match.group(2), match.group(3)
+        
+        if ruta_img.startswith(('http://', 'https://', 'data:')):
+            return match.group(0)
+            
+        ruta_absoluta = (html_dir / ruta_img).resolve()
+        
+        if ruta_absoluta.exists():
+            # Formato que Word entiende (ruta absoluta estilo UNIX)
+            return f'{prefijo}file:///{ruta_absoluta.as_posix()}{sufijo}'
+        
+        # Si la imagen no existe, dejar la ruta original pero mostrar advertencia
+        print(f"  [!] Imagen no encontrada: {ruta_img}")
+        return match.group(0)
+    
+    contenido = re.sub(patron_img, actualizar_img, contenido, flags=re.IGNORECASE)
+    
+    return contenido
 
-            # Procesar con Word
-            doc = word.Documents.Open(ruta_temp)
+def convertir_a_word_pdf(html_path, output_dir):
+    """Convierte el archivo HTML a Word y PDF"""
+    nombre_base = html_path.stem
+    temp_html = output_dir / f"temp_{html_path.name}"
+    
+    try:
+        # Procesar y guardar HTML temporal
+        contenido = procesar_html(html_path)
+        temp_html.write_text(contenido, encoding='utf-8')
+        
+        # Iniciar Word
+        word = win32.DispatchEx('Word.Application')  # Usar DispatchEx para nueva instancia
+        word.Visible = False
+        
+        try:
+            # Convertir a Word
+            doc = word.Documents.Open(str(temp_html))
             
-            # Configurar Word para mantener imágenes vinculadas
-            word.ActiveDocument.Fields.Update()
+            # Guardar como DOCX
+            docx_path = output_dir / f"{nombre_base}.docx"
+            doc.SaveAs(str(docx_path), FileFormat=16)
             
-            # Guardar resultados
-            ruta_docx = os.path.join(carpeta_salida, f"{nombre_base}.docx")
-            doc.SaveAs(ruta_docx, FileFormat=16)
-            
-            ruta_pdf = os.path.join(carpeta_salida, f"{nombre_base}.pdf")
-            doc.SaveAs(ruta_pdf, FileFormat=17)
+            # Guardar como PDF
+            pdf_path = output_dir / f"{nombre_base}.pdf"
+            doc.SaveAs(str(pdf_path), FileFormat=17)
             
             doc.Close()
-            os.remove(ruta_temp)
-            
+            return True
         except Exception as e:
-            print(f"Error procesando {archivo}: {str(e)}")
-            # Si hay error, continuar con el siguiente archivo
-            continue
+            print(f"  [!] Error en Word: {str(e)}")
+            return False
+        finally:
+            word.Quit()
+    except Exception as e:
+        print(f"  [!] Error general: {str(e)}")
+        return False
+    finally:
+        if temp_html.exists():
+            temp_html.unlink()
 
-# Cerrar Word
-word.Quit()
+# Procesar todos los archivos HTML/HTM
+print("Iniciando conversión...")
+exitosos = 0
 
-print("✅ Conversión completada con imágenes locales incluidas")
+for html_file in CARPETA_HTML.glob("*.[hH][tT][mM]*"):
+    print(f"\nProcesando: {html_file.name}")
+    
+    if convertir_a_word_pdf(html_file, CARPETA_SALIDA):
+        print(f"  ✔ Convertido: {html_file.stem}.docx/pdf")
+        exitosos += 1
+    else:
+        print(f"  ✖ Falló la conversión: {html_file.name}")
+
+print(f"\nProceso completado. Archivos exitosos: {exitosos}")
+if exitosos < len(list(CARPETA_HTML.glob("*.[hH][tT][mM]*"))):
+    print("  [!] Algunos archivos no se pudieron convertir. Ver mensajes anteriores.")
