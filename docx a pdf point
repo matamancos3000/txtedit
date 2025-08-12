@@ -1,8 +1,7 @@
-import os
-import win32com.client as win32
 import re
 from pathlib import Path
 import urllib.parse
+import shutil
 
 # Configuración
 CARPETA_HTML = Path(r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos")
@@ -13,51 +12,23 @@ URL_SHAREPOINT = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20comp
 CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)
 
 def reparar_ruta_imagen(html_path, ruta_img):
-    """Convierte rutas de imágenes a formato absoluto que Word pueda entender"""
+    """Convierte rutas de imágenes a formato absoluto"""
     html_dir = html_path.parent
     html_name = html_path.stem
     
-    # Caso 1: Ruta relativa directa (ej: "imagen.jpg")
-    if not any(sep in ruta_img for sep in ('/', '\\')):
-        img_path = html_dir / ruta_img
-    
-    # Caso 2: Ruta en carpeta _archivos (ej: "IT-CC-05_archivos/image001.jpg")
-    elif '_archivos' in ruta_img.lower() or 'image' in ruta_img.lower():
+    # Caso 1: Ruta en carpeta _archivos
+    if '_archivos' in ruta_img.lower():
         parts = [p for p in re.split(r'[/\\]', ruta_img) if p]
         img_name = parts[-1]
         img_path = html_dir / f"{html_name}_archivos" / img_name
-    
-    # Caso 3: Ruta relativa con subdirectorios (ej: "assets/imagen.jpg")
     else:
         img_path = html_dir / ruta_img
     
-    # Verificar existencia
-    if not img_path.exists():
-        print(f"\n[ADVERTENCIA] No se encontró la imagen: {img_path}")
-        return ruta_img  # Mantener original si no se encuentra
-    
-    # Convertir a formato URI para Word (manejo especial para Windows)
-    ruta_absoluta = img_path.resolve()
-    
-    # Solución definitiva para el formato file:///
-    if os.name == 'nt':  # Windows
-        # Convertir C:\ruta → /C:/ruta
-        path_uri = str(ruta_absoluta).replace('\\', '/')
-        if not path_uri.startswith('/'):
-            path_uri = '/' + path_uri
-    else:  # Linux/Mac
-        path_uri = str(ruta_absoluta)
-    
-    # Codificar solo los componentes necesarios
-    path_uri = '/'.join(
-        urllib.parse.quote(part, safe='') 
-        for part in path_uri.split('/')
-    )
-    
-    return f"file://{path_uri}"
+    # Devolver ruta original si no existe
+    return str(img_path.resolve()) if img_path.exists() else ruta_img
 
 def procesar_html(html_path):
-    """Procesa el HTML y repara rutas de imágenes"""
+    """Procesa el HTML y repara rutas"""
     with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
         contenido = f.read()
     
@@ -69,9 +40,9 @@ def procesar_html(html_path):
         flags=re.IGNORECASE
     )
     
-    # Reparar rutas de imágenes (solo src, no href)
+    # Reparar rutas de imágenes locales (solo src)
     contenido = re.sub(
-        r'src=["\']([^"\']*\.(?:jpe?g|png|gif|bmp|svg|webp|ico))["\']',
+        r'src=["\']((?!https?://|data:)[^"\']*\.(?:jpe?g|png|gif|bmp|svg|webp|ico))["\']',
         lambda m: f'src="{reparar_ruta_imagen(html_path, m.group(1))}"',
         contenido,
         flags=re.IGNORECASE
@@ -79,58 +50,34 @@ def procesar_html(html_path):
     
     return contenido
 
-def convertir_archivo(html_path):
-    """Convierte un archivo HTML a Word y PDF"""
-    nombre_base = html_path.stem
-    temp_html = CARPETA_SALIDA / f"temp_{html_path.name}"
+def copiar_archivos_adjuntos(html_path, output_dir):
+    """Copia la carpeta _archivos a la carpeta de salida"""
+    html_name = html_path.stem
+    carpeta_archivos = html_path.parent / f"{html_name}_archivos"
     
-    try:
-        # Paso 1: Procesar HTML
-        contenido = procesar_html(html_path)
-        temp_html.write_text(contenido, encoding='utf-8')
-        
-        # Paso 2: Convertir con Word
-        word = win32.DispatchEx('Word.Application')
-        word.Visible = False
-        
-        try:
-            doc = word.Documents.Open(str(temp_html))
-            
-            # Forzar actualización de campos y vínculos
-            word.ActiveDocument.Fields.Update()
-            word.ActiveDocument.Reload()
-            
-            # Guardar resultados
-            doc.SaveAs(str(CARPETA_SALIDA / f"{nombre_base}.docx"), FileFormat=16)
-            doc.SaveAs(str(CARPETA_SALIDA / f"{nombre_base}.pdf"), FileFormat=17)
-            
-            doc.Close()
-            return True
-        except Exception as e:
-            print(f"Error en Word: {str(e)}")
-            return False
-        finally:
-            word.Quit()
-    except Exception as e:
-        print(f"Error general: {str(e)}")
-        return False
-    finally:
-        if temp_html.exists():
-            temp_html.unlink()
+    if carpeta_archivos.exists() and carpeta_archivos.is_dir():
+        dest_dir = output_dir / f"{html_name}_archivos"
+        shutil.copytree(carpeta_archivos, dest_dir, dirs_exist_ok=True)
 
 # Proceso principal
-print("Iniciando conversión con manejo mejorado de rutas...")
+print("Iniciando modificación de archivos HTM...")
 
 for html_file in CARPETA_HTML.glob("*.[hH][tT][mM]*"):
-    print(f"\n● Procesando: {html_file.name}")
+    print(f"\nProcesando: {html_file.name}")
     
-    if convertir_archivo(html_file):
-        print(f"  ✅ Conversión exitosa")
-    else:
-        print(f"  ❌ Falló la conversión")
-    
-    # Generar archivo de diagnóstico
-    debug_content = procesar_html(html_file)
-    (CARPETA_SALIDA / f"DEBUG_{html_file.name}").write_text(debug_content, encoding='utf-8')
+    try:
+        # Procesar contenido HTML
+        contenido_modificado = procesar_html(html_file)
+        
+        # Guardar nuevo archivo
+        output_path = CARPETA_SALIDA / html_file.name
+        output_path.write_text(contenido_modificado, encoding='utf-8')
+        
+        # Copiar archivos adjuntos (_archivos)
+        copiar_archivos_adjuntos(html_file, CARPETA_SALIDA)
+        
+        print(f"  ✅ Archivo modificado guardado en: {output_path}")
+    except Exception as e:
+        print(f"  ❌ Error al procesar {html_file.name}: {str(e)}")
 
-print("\nProceso completado. Revise los archivos DEBUG_*.htm para verificar las rutas generadas.")
+print("\nProceso completado. Archivos modificados en:", CARPETA_SALIDA)
