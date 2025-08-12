@@ -3,9 +3,9 @@ from pathlib import Path
 import shutil
 import os
 
-# Configuración
-CARPETA_HTML = Path(r"C:\Users\45056372\Desktop\batch reporte de token 2")
-CARPETA_SALIDA = Path(r"C:\Users\45056372\Desktop\batch reporte de token 2\salida")
+# Configuración actualizada
+CARPETA_HTML = Path(r"C:\Users\45056372\Desktop\prueba its")
+CARPETA_SALIDA = Path(r"C:\Users\45056372\Desktop\prueba its\salida")
 URL_SHAREPOINT = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20compartidos/Carpeta/"
 
 # Crear carpeta de salida
@@ -16,9 +16,10 @@ def procesar_html(html_path):
     with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
         contenido = f.read()
     
-    # 1. Actualizar solo enlaces a .htm/.html principales
+    # 1. Actualizar enlaces .htm/.html a PDFs en SharePoint (versión corregida)
     def actualizar_enlaces(match):
-        nombre_base = os.path.splitext(match.group(1))[0]
+        nombre_archivo = match.group(1)
+        nombre_base = os.path.splitext(nombre_archivo)[0]
         return f'href="{URL_SHAREPOINT}{nombre_base}.pdf"'
     
     contenido = re.sub(
@@ -28,12 +29,12 @@ def procesar_html(html_path):
         flags=re.IGNORECASE
     )
     
-    # 2. Normalizar rutas de imágenes en _archivos
+    # 2. Normalizar rutas de imágenes en _archivos (versión corregida sin error de backslash)
     def normalizar_rutas_imagen(match):
+        comilla = match.group(1)
         ruta_imagen = match.group(2)
-        # Solución al problema del backslash:
         ruta_normalizada = ruta_imagen.replace("\\", "/")
-        return f'src="{match.group(1)}{ruta_normalizada}{match.group(1)}'
+        return f'src={comilla}{ruta_normalizada}{comilla}'
     
     contenido = re.sub(
         r'src=(["\'])([^"\']*_archivos[\\/][^"\']*\.(?:jpe?g|png|gif|bmp|svg|webp|ico))\1',
@@ -59,7 +60,7 @@ def copiar_estructura_completa(html_path, output_dir):
         print(f"  📂 Carpeta copiada: {dest_dir.name}")
 
 # Proceso principal
-print("Iniciando procesamiento manteniendo estructura de imágenes...")
+print("Iniciando procesamiento de archivos HTM...")
 
 for html_file in CARPETA_HTML.glob("*.htm*"):
     if html_file.is_file() and '_archivos' not in str(html_file.parent):
@@ -77,6 +78,7 @@ for html_file in CARPETA_HTML.glob("*.htm*"):
             copiar_estructura_completa(html_file, CARPETA_SALIDA)
             
             print(f"  ✅ Archivo procesado: {html_file.name}")
+            print(f"  🔗 Ejemplo de enlace modificado: {re.findall(r'href=["\'][^"\']*\.pdf["\']', contenido)[0][:50]}...")
         except Exception as e:
             print(f"  ❌ Error procesando {html_file.name}: {str(e)}")
 
