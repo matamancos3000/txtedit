@@ -1,106 +1,69 @@
-from pathlib import Path
 import os
-import re
-import shutil
-import time
-import urllib.parse
 import win32com.client as win32
+import re
 
-# ====== CONFIGURA ESTO ======
-carpeta_html = Path(r"local")  # Carpeta local con tus HTML
-ruta_base_sharepoint = "liga shere"
-usar_enlaces_relativos = True  # Cambia a False si quieres usar enlaces absolutos con ruta_base_sharepoint
-# ============================
+# Ruta local de la carpeta con los HTML
+carpeta_html = r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos"
+carpeta_salida = r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos\salida"
 
-# Limpieza de URL base (quitar parámetros y fragmentos)
-def limpiar_url_base(url):
-    parsed = urllib.parse.urlparse(url)
-    url_limpia = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip('/'), '', '', ''))
-    return url_limpia
+# URL base de SharePoint donde se guardarán/consultarán los PDFs
+url_base_sharepoint = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20compartidos/Carpeta/"
 
-ruta_base_sharepoint_limpia = limpiar_url_base(ruta_base_sharepoint)
+# Crear carpeta de salida si no existe
+os.makedirs(carpeta_salida, exist_ok=True)
 
-print(f"URL base limpia para SharePoint: {ruta_base_sharepoint_limpia}")
-print(f"Usando enlaces {'relativos' if usar_enlaces_relativos else 'absolutos'}")
-
-# Crear carpeta de salida para DOCX y PDF dentro de la carpeta HTML
-carpeta_salida = carpeta_html / "salida"
-carpeta_salida.mkdir(parents=True, exist_ok=True)
-
-# Validar existencia carpeta_html
-if not carpeta_html.exists():
-    raise SystemExit(f"❗ La carpeta no existe: {carpeta_html}")
-
-# Buscar archivos HTML
-html_files = sorted([p for p in carpeta_html.iterdir() if p.suffix.lower() in (".htm", ".html")])
-if not html_files:
-    raise SystemExit(f"❗ No se encontraron archivos .htm/.html en {carpeta_html}")
+# Función para actualizar los enlaces en el contenido HTML
+def actualizar_enlaces(contenido):
+    # Buscar enlaces que apunten a archivos .htm o .html
+    patron = r'href=["\']([^"\']+\.htm[l]?)["\']'
+    
+    def reemplazar_enlace(match):
+        nombre_archivo = match.group(1)
+        nombre_base = os.path.splitext(nombre_archivo)[0]
+        # Aquí cambiamos el enlace para que apunte a SharePoint
+        return f'href="{url_base_sharepoint}{nombre_base}.pdf"'
+    
+    return re.sub(patron, reemplazar_enlace, contenido, flags=re.IGNORECASE)
 
 # Iniciar Word
-word = None
-try:
-    word = win32.Dispatch('Word.Application')
-    word.Visible = False
+word = win32.Dispatch('Word.Application')
+word.Visible = False  # No mostrar ventana
 
-    for ruta_html in html_files:
-        nombre_base = ruta_html.stem
-        ruta_docx = carpeta_salida / f"{nombre_base}.docx"
-        ruta_pdf = carpeta_salida / f"{nombre_base}.pdf"
+for archivo in os.listdir(carpeta_html):
+    if archivo.lower().endswith((".htm", ".html")):
+        ruta_html = os.path.join(carpeta_html, archivo)
+        nombre_base = os.path.splitext(archivo)[0]
 
-        print(f"📄 Procesando: {ruta_html.name}")
+        print(f"Procesando: {archivo}")
 
-        # Abrir HTML
-        doc = word.Documents.Open(str(ruta_html))
+        # Leer el contenido HTML y actualizar enlaces
+        with open(ruta_html, 'r', encoding='utf-8') as f:
+            contenido = f.read()
+        
+        contenido_actualizado = actualizar_enlaces(contenido)
 
-        # Guardar como DOCX y PDF
-        doc.SaveAs(str(ruta_docx), FileFormat=16)
-        doc.SaveAs(str(ruta_pdf), FileFormat=17)
+        # Guardar temporalmente el HTML modificado
+        ruta_temp = os.path.join(carpeta_salida, f"temp_{archivo}")
+        with open(ruta_temp, 'w', encoding='utf-8') as f:
+            f.write(contenido_actualizado)
+
+        # Abrir HTML modificado en Word
+        doc = word.Documents.Open(ruta_temp)
+
+        # Guardar como DOCX
+        ruta_docx = os.path.join(carpeta_salida, f"{nombre_base}.docx")
+        doc.SaveAs(ruta_docx, FileFormat=16)  # 16 = Word (.docx)
+
+        # Guardar como PDF
+        ruta_pdf = os.path.join(carpeta_salida, f"{nombre_base}.pdf")
+        doc.SaveAs(ruta_pdf, FileFormat=17)  # 17 = PDF
 
         doc.Close()
+        
+        # Eliminar archivo temporal
+        os.remove(ruta_temp)
 
-    print("✅ Conversión a DOCX y PDF completada")
+# Cerrar Word
+word.Quit()
 
-finally:
-    if word is not None:
-        try:
-            word.Quit()
-        except Exception:
-            pass
-
-# Patrón para encontrar enlaces .htm/.html
-pattern = re.compile(r'(?i)(href\s*=\s*["\'])([^"\']+?)(?:\.(?:htm|html))([^"\']*)(["\'])')
-
-# Hacer backup y reemplazar enlaces en HTML
-for ruta_html in html_files:
-    ts = time.strftime("%Y%m%d%H%M%S")
-    backup = ruta_html.with_suffix(ruta_html.suffix + f".bak.{ts}")
-    shutil.copy2(ruta_html, backup)
-    print(f"🔒 Backup creado: {backup.name}")
-
-    contenido = ruta_html.read_text(encoding="utf-8", errors="ignore")
-
-    def reemplazo(m):
-        pref = m.group(1)
-        path_before_ext = m.group(2)
-        suffix = m.group(3)
-        quote = m.group(4)
-        pdf_name = Path(path_before_ext).name + ".pdf"
-
-        if usar_enlaces_relativos:
-            # Enlaces relativos solo con el nombre del PDF (sin ruta base)
-            new_url = pdf_name + suffix
-        else:
-            # Enlaces absolutos con URL base limpia
-            new_url = ruta_base_sharepoint_limpia.rstrip("/") + "/" + pdf_name + suffix
-
-        return f'{pref}{new_url}{quote}'
-
-    contenido_mod = pattern.sub(reemplazo, contenido)
-
-    if contenido_mod != contenido:
-        ruta_html.write_text(contenido_mod, encoding="utf-8", errors="ignore")
-        print(f"🔗 Enlaces actualizados en: {ruta_html.name}")
-    else:
-        print(f"— No se detectaron enlaces .htm para reemplazar en: {ruta_html.name}")
-
-print("\n🎯 Proceso finalizado.")
+print("✅ Conversión completada con enlaces a SharePoint")
