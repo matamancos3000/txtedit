@@ -4,8 +4,8 @@ import shutil
 import os
 
 # Configuración
-CARPETA_HTML = Path(r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos")
-CARPETA_SALIDA = Path(r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos\salida")
+CARPETA_HTML = Path(r"C:\Users\45056372\Desktop\batch reporte de token 2")
+CARPETA_SALIDA = Path(r"C:\Users\45056372\Desktop\batch reporte de token 2\salida")
 URL_SHAREPOINT = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20compartidos/Carpeta/"
 
 # Crear carpeta de salida
@@ -30,9 +30,10 @@ def procesar_html(html_path):
     
     # 2. Normalizar rutas de imágenes en _archivos
     def normalizar_rutas_imagen(match):
-        ruta_imagen = match.group(1)
-        # Reemplazar barras invertidas y asegurar compatibilidad
-        return f'src="{ruta_imagen.replace("\\", "/")}"'
+        ruta_imagen = match.group(2)
+        # Solución al problema del backslash:
+        ruta_normalizada = ruta_imagen.replace("\\", "/")
+        return f'src="{match.group(1)}{ruta_normalizada}{match.group(1)}'
     
     contenido = re.sub(
         r'src=(["\'])([^"\']*_archivos[\\/][^"\']*\.(?:jpe?g|png|gif|bmp|svg|webp|ico))\1',
