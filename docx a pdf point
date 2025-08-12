@@ -2,39 +2,58 @@ import os
 import win32com.client as win32
 import re
 from urllib.parse import quote
+from pathlib import Path
 
-# Ruta local de la carpeta con los HTML
+# Configuración de rutas
 carpeta_html = r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos"
 carpeta_salida = r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos\salida"
-
-# URL base de SharePoint donde se guardarán/consultarán los PDFs
 url_base_sharepoint = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20compartidos/Carpeta/"
 
 # Crear carpeta de salida si no existe
 os.makedirs(carpeta_salida, exist_ok=True)
 
-def actualizar_enlaces(contenido):
+def actualizar_enlaces(contenido, html_path):
     """
-    Actualiza solo los enlaces .htm/.html para que apunten a PDFs en SharePoint,
-    sin modificar enlaces a imágenes ni otros recursos.
+    Actualiza los enlaces .htm/.html para SharePoint y ajusta rutas de imágenes locales
     """
+    # Convertir rutas a objetos Path para mejor manejo
+    html_dir = Path(html_path).parent
+    
     # Patrón para encontrar href que apunten a archivos .htm/.html locales
-    patron = r'(href=["\'])((?!https?://|mailto:)[^"\']*\.htm[l]?)(["\'])'
+    patron_href = r'(href=["\'])((?!https?://|mailto:)[^"\']*\.htm[l]?)(["\'])'
     
     def reemplazar_enlace(match):
-        # Extraer partes del match
         prefijo = match.group(1)
         nombre_archivo = match.group(2)
         sufijo = match.group(3)
         
-        # Solo procesar si no es una URL completa y es .htm/.html
         if not nombre_archivo.startswith(('http://', 'https://', 'mailto:')):
             nombre_base = os.path.splitext(nombre_archivo)[0]
             nombre_codificado = quote(f"{nombre_base}.pdf")
             return f'{prefijo}{url_base_sharepoint}{nombre_codificado}{sufijo}'
         return match.group(0)
     
-    return re.sub(patron, reemplazar_enlace, contenido, flags=re.IGNORECASE)
+    # Actualizar enlaces HTML a PDF
+    contenido = re.sub(patron_href, reemplazar_enlace, contenido, flags=re.IGNORECASE)
+    
+    # Patrón para encontrar src de imágenes locales
+    patron_img = r'(src=["\'])((?!https?://|data:)[^"\']*\.(jpg|jpeg|png|gif|bmp|svg|webp|ico))(["\'])'
+    
+    def ajustar_ruta_imagen(match):
+        prefijo = match.group(1)
+        ruta_imagen = match.group(2)
+        sufijo = match.group(4)
+        
+        if not ruta_imagen.startswith(('http://', 'https://', 'data:')):
+            # Convertir ruta relativa a absoluta
+            ruta_absoluta = (html_dir / ruta_imagen).resolve()
+            
+            # Para Word, necesitamos la ruta como file:///
+            return f'{prefijo}file:///{ruta_absoluta.as_posix()}{sufijo}'
+        return match.group(0)
+    
+    # Actualizar rutas de imágenes
+    return re.sub(patron_img, ajustar_ruta_imagen, contenido, flags=re.IGNORECASE)
 
 # Iniciar Word
 word = win32.Dispatch('Word.Application')
@@ -52,7 +71,7 @@ for archivo in os.listdir(carpeta_html):
             with open(ruta_html, 'r', encoding='utf-8', errors='ignore') as f:
                 contenido = f.read()
             
-            contenido_actualizado = actualizar_enlaces(contenido)
+            contenido_actualizado = actualizar_enlaces(contenido, ruta_html)
 
             # Guardar temporalmente
             ruta_temp = os.path.join(carpeta_salida, f"temp_{archivo}")
@@ -61,6 +80,9 @@ for archivo in os.listdir(carpeta_html):
 
             # Procesar con Word
             doc = word.Documents.Open(ruta_temp)
+            
+            # Configurar Word para mantener imágenes vinculadas
+            word.ActiveDocument.Fields.Update()
             
             # Guardar resultados
             ruta_docx = os.path.join(carpeta_salida, f"{nombre_base}.docx")
@@ -74,8 +96,10 @@ for archivo in os.listdir(carpeta_html):
             
         except Exception as e:
             print(f"Error procesando {archivo}: {str(e)}")
+            # Si hay error, continuar con el siguiente archivo
+            continue
 
 # Cerrar Word
 word.Quit()
 
-print("✅ Conversión completada con enlaces directos a SharePoint")
+print("✅ Conversión completada con imágenes locales incluidas")
