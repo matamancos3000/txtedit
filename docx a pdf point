@@ -16,18 +16,27 @@ def procesar_html(html_path):
     with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
         contenido = f.read()
     
-    # 1. Actualizar solo enlaces a .htm/.html principales (no en _archivos)
+    # 1. Actualizar solo enlaces a .htm/.html principales
+    def actualizar_enlaces(match):
+        nombre_base = os.path.splitext(match.group(1))[0]
+        return f'href="{URL_SHAREPOINT}{nombre_base}.pdf"'
+    
     contenido = re.sub(
         r'href=["\']([^"\']*\.htm[l]?)["\']',
-        lambda m: f'href="{URL_SHAREPOINT}{os.path.splitext(m.group(1))[0]}.pdf"',
+        actualizar_enlaces,
         contenido,
         flags=re.IGNORECASE
     )
     
-    # 2. Mantener rutas originales de imágenes en _archivos
+    # 2. Normalizar rutas de imágenes en _archivos
+    def normalizar_rutas_imagen(match):
+        ruta_imagen = match.group(1)
+        # Reemplazar barras invertidas y asegurar compatibilidad
+        return f'src="{ruta_imagen.replace("\\", "/")}"'
+    
     contenido = re.sub(
-        r'src=["\']([^"\']*_archivos[\\/][^"\']*\.(?:jpe?g|png|gif|bmp|svg|webp|ico))["\']',
-        lambda m: f'src="{m.group(1).replace("\\", "/")}"',  # Normalizar a /
+        r'src=(["\'])([^"\']*_archivos[\\/][^"\']*\.(?:jpe?g|png|gif|bmp|svg|webp|ico))\1',
+        normalizar_rutas_imagen,
         contenido,
         flags=re.IGNORECASE
     )
@@ -46,12 +55,13 @@ def copiar_estructura_completa(html_path, output_dir):
     if carpeta_archivos.exists():
         dest_dir = output_dir / f"{html_name}_archivos"
         shutil.copytree(carpeta_archivos, dest_dir, dirs_exist_ok=True)
+        print(f"  📂 Carpeta copiada: {dest_dir.name}")
 
 # Proceso principal
 print("Iniciando procesamiento manteniendo estructura de imágenes...")
 
 for html_file in CARPETA_HTML.glob("*.htm*"):
-    if html_file.is_file() and not '_archivos' in str(html_file.parent):
+    if html_file.is_file() and '_archivos' not in str(html_file.parent):
         print(f"\n● Procesando: {html_file.name}")
         
         try:
@@ -66,9 +76,8 @@ for html_file in CARPETA_HTML.glob("*.htm*"):
             copiar_estructura_completa(html_file, CARPETA_SALIDA)
             
             print(f"  ✅ Archivo procesado: {html_file.name}")
-            print(f"  📁 Carpeta copiada: {html_file.stem}_archivos/")
         except Exception as e:
             print(f"  ❌ Error procesando {html_file.name}: {str(e)}")
 
-print("\nProceso completado. Estructura completa copiada a:", CARPETA_SALIDA)
-print("Las imágenes deberían mostrarse correctamente manteniendo las rutas relativas.")
+print("\n✔ Proceso completado exitosamente.")
+print(f"Directorio de salida: {CARPETA_SALIDA}")
