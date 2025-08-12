@@ -2,8 +2,9 @@ import re
 from pathlib import Path
 import urllib.parse
 import shutil
+import os
 
-# Configuración actualizada con tus rutas
+# Configuración actualizada
 CARPETA_HTML = Path(r"C:\Users\45056372\Desktop\prueba its")
 CARPETA_SALIDA = Path(r"C:\Users\45056372\Desktop\prueba its\salida")
 URL_SHAREPOINT = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20compartidos/Carpeta/"
@@ -11,29 +12,40 @@ URL_SHAREPOINT = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20comp
 # Crear carpeta de salida
 CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)
 
+def convertir_enlaces(contenido):
+    """Convierte todos los enlaces .htm/.html a .pdf manteniendo el mismo nombre base"""
+    # Patrón mejorado para capturar diferentes formatos de enlaces
+    patron = r'''
+        href=             # Atributo href
+        (["\'])          # Grupo 1: Comilla simple o doble
+        ([^"\']+?\.htm[l]?)  # Grupo 2: Nombre del archivo con extensión .htm o .html
+        \1               # Misma comilla de cierre
+    '''
+    
+    def reemplazar_enlace(match):
+        comilla = match.group(1)
+        nombre_archivo = match.group(2)
+        
+        # Extraer solo el nombre del archivo sin ruta ni extensión
+        nombre_base = os.path.splitext(os.path.basename(nombre_archivo))[0]
+        
+        # Construir nuevo enlace
+        return f'href={comilla}{URL_SHAREPOINT}{urllib.parse.quote(nombre_base)}.pdf{comilla}'
+    
+    return re.sub(patron, reemplazar_enlace, contenido, flags=re.IGNORECASE | re.VERBOSE)
+
 def procesar_html(html_path):
-    """Procesa el HTML cambiando solo enlaces .htm/.html a .pdf"""
+    """Procesa el archivo HTML cambiando solo los enlaces .htm/.html"""
     with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
         contenido = f.read()
     
-    # Función para convertir enlaces .htm/.html a .pdf
-    def convertir_enlace(match):
-        nombre_archivo = match.group(1)
-        nombre_base = Path(nombre_archivo).stem  # Obtener nombre sin extensión
-        return f'href="{URL_SHAREPOINT}{urllib.parse.quote(nombre_base)}.pdf"'
+    # Convertir enlaces .htm/.html a .pdf
+    contenido_modificado = convertir_enlaces(contenido)
     
-    # Actualizar solo enlaces que terminen en .htm o .html
-    contenido = re.sub(
-        r'href=["\']([^"\']*\.htm[l]?)["\']',
-        convertir_enlace,
-        contenido,
-        flags=re.IGNORECASE
-    )
-    
-    return contenido
+    return contenido_modificado
 
-def copiar_estructura_completa(html_path, output_dir):
-    """Copia el archivo HTML y toda su estructura adjunta"""
+def copiar_estructura(html_path, output_dir):
+    """Copia el archivo y su estructura adjunta"""
     # Copiar archivo principal
     shutil.copy2(html_path, output_dir)
     
@@ -49,28 +61,28 @@ def copiar_estructura_completa(html_path, output_dir):
 print("Iniciando conversión de enlaces .htm/.html a .pdf...")
 
 for html_file in CARPETA_HTML.glob("*.[hH][tT][mM]*"):
-    if html_file.is_file():  # Procesar solo archivos (no directorios)
+    if html_file.is_file() and '_archivos' not in str(html_file.parent):
         print(f"\n● Procesando: {html_file.name}")
         
         try:
-            # Procesar HTML (solo enlaces)
+            # Paso 1: Procesar el archivo HTML
             contenido = procesar_html(html_file)
             
-            # Guardar archivo modificado
-            output_html = CARPETA_SALIDA / html_file.name
-            output_html.write_text(contenido, encoding='utf-8')
+            # Paso 2: Guardar el archivo modificado
+            output_path = CARPETA_SALIDA / html_file.name
+            output_path.write_text(contenido, encoding='utf-8')
             
-            # Copiar estructura adjunta (carpetas _archivos)
-            copiar_estructura_completa(html_file, CARPETA_SALIDA)
+            # Paso 3: Copiar archivos adjuntos
+            copiar_estructura(html_file, CARPETA_SALIDA)
             
-            print(f"  ✅ Archivo procesado: {html_file.name}")
-            
-            # Mostrar ejemplo de enlace modificado (para verificación)
-            enlaces_modificados = re.findall(r'href=["\'][^"\']*\.pdf["\']', contenido)
-            if enlaces_modificados:
-                print(f"  🔗 Enlace modificado: {enlaces_modificados[0][:60]}...")
-            
+            # Mostrar ejemplo de cambio
+            enlaces = re.findall(r'href=["\'][^"\']*\.pdf["\']', contenido)
+            if enlaces:
+                print(f"  ✅ Enlace modificado: {enlaces[0][:70]}...")
+            else:
+                print("  ⚠ No se encontraron enlaces .htm/.html para convertir")
+                
         except Exception as e:
             print(f"  ❌ Error procesando {html_file.name}: {str(e)}")
 
-print("\n✔ Proceso completado. Resultados en:", CARPETA_SALIDA)
+print("\n✔ Proceso completado. Archivos en:", CARPETA_SALIDA)
