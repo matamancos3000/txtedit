@@ -1,6 +1,7 @@
 import os
 import win32com.client as win32
 import re
+from urllib.parse import quote
 
 # Ruta local de la carpeta con los HTML
 carpeta_html = r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos"
@@ -12,22 +13,29 @@ url_base_sharepoint = "https://tubanco.sharepoint.com/sites/misitio/Documentos%2
 # Crear carpeta de salida si no existe
 os.makedirs(carpeta_salida, exist_ok=True)
 
-# Función para actualizar los enlaces en el contenido HTML
 def actualizar_enlaces(contenido):
-    # Buscar enlaces que apunten a archivos .htm o .html
-    patron = r'href=["\']([^"\']+\.htm[l]?)["\']'
+    """
+    Actualiza los enlaces .htm/.html para que apunten a PDFs en SharePoint,
+    excluyendo enlaces a imágenes y otros recursos.
+    """
+    # Patrón para encontrar href que apunten a archivos .htm/.html pero no a imágenes
+    patron = r'href=["\']((?!.*\.(jpg|jpeg|png|gif|bmp|svg|webp|ico))[^"\']+\.htm[l]?)["\']'
     
     def reemplazar_enlace(match):
         nombre_archivo = match.group(1)
         nombre_base = os.path.splitext(nombre_archivo)[0]
-        # Aquí cambiamos el enlace para que apunte a SharePoint
-        return f'href="{url_base_sharepoint}{nombre_base}.pdf"'
+        
+        # Codificar caracteres especiales para URL
+        nombre_codificado = quote(f"{nombre_base}.pdf")
+        
+        # Construir URL completa de SharePoint
+        return f'href="{url_base_sharepoint}{nombre_codificado}"'
     
     return re.sub(patron, reemplazar_enlace, contenido, flags=re.IGNORECASE)
 
 # Iniciar Word
 word = win32.Dispatch('Word.Application')
-word.Visible = False  # No mostrar ventana
+word.Visible = False
 
 for archivo in os.listdir(carpeta_html):
     if archivo.lower().endswith((".htm", ".html")):
@@ -36,34 +44,35 @@ for archivo in os.listdir(carpeta_html):
 
         print(f"Procesando: {archivo}")
 
-        # Leer el contenido HTML y actualizar enlaces
-        with open(ruta_html, 'r', encoding='utf-8') as f:
-            contenido = f.read()
-        
-        contenido_actualizado = actualizar_enlaces(contenido)
+        try:
+            # Leer y actualizar contenido
+            with open(ruta_html, 'r', encoding='utf-8', errors='ignore') as f:
+                contenido = f.read()
+            
+            contenido_actualizado = actualizar_enlaces(contenido)
 
-        # Guardar temporalmente el HTML modificado
-        ruta_temp = os.path.join(carpeta_salida, f"temp_{archivo}")
-        with open(ruta_temp, 'w', encoding='utf-8') as f:
-            f.write(contenido_actualizado)
+            # Guardar temporalmente
+            ruta_temp = os.path.join(carpeta_salida, f"temp_{archivo}")
+            with open(ruta_temp, 'w', encoding='utf-8') as f:
+                f.write(contenido_actualizado)
 
-        # Abrir HTML modificado en Word
-        doc = word.Documents.Open(ruta_temp)
-
-        # Guardar como DOCX
-        ruta_docx = os.path.join(carpeta_salida, f"{nombre_base}.docx")
-        doc.SaveAs(ruta_docx, FileFormat=16)  # 16 = Word (.docx)
-
-        # Guardar como PDF
-        ruta_pdf = os.path.join(carpeta_salida, f"{nombre_base}.pdf")
-        doc.SaveAs(ruta_pdf, FileFormat=17)  # 17 = PDF
-
-        doc.Close()
-        
-        # Eliminar archivo temporal
-        os.remove(ruta_temp)
+            # Procesar con Word
+            doc = word.Documents.Open(ruta_temp)
+            
+            # Guardar resultados
+            ruta_docx = os.path.join(carpeta_salida, f"{nombre_base}.docx")
+            doc.SaveAs(ruta_docx, FileFormat=16)
+            
+            ruta_pdf = os.path.join(carpeta_salida, f"{nombre_base}.pdf")
+            doc.SaveAs(ruta_pdf, FileFormat=17)
+            
+            doc.Close()
+            os.remove(ruta_temp)
+            
+        except Exception as e:
+            print(f"Error procesando {archivo}: {str(e)}")
 
 # Cerrar Word
 word.Quit()
 
-print("✅ Conversión completada con enlaces a SharePoint")
+print("✅ Conversión completada con enlaces directos a SharePoint")
