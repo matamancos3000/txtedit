@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
-import urllib.parse
 import shutil
+import os
 
 # Configuración
 CARPETA_HTML = Path(r"C:\Users\Erick Baez\Documents\html a pdf\ejemplos")
@@ -11,74 +11,64 @@ URL_SHAREPOINT = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20comp
 # Crear carpeta de salida
 CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)
 
-def es_archivo_adjunto(ruta):
-    """Determina si el archivo está dentro de una carpeta _archivos"""
-    return '_archivos' in str(ruta.parent)
-
 def procesar_html(html_path):
-    """Procesa el HTML y repara rutas, excluyendo archivos en _archivos"""
-    if es_archivo_adjunto(html_path):
-        print(f"  ↳ [Omitido] Archivo adjunto: {html_path.name}")
-        return None
-        
+    """Procesa el HTML manteniendo rutas relativas de imágenes"""
     with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
         contenido = f.read()
     
-    # Actualizar enlaces a PDF en SharePoint (solo para archivos principales)
+    # 1. Actualizar solo enlaces a .htm/.html principales (no en _archivos)
     contenido = re.sub(
         r'href=["\']([^"\']*\.htm[l]?)["\']',
-        lambda m: f'href="{URL_SHAREPOINT}{urllib.parse.quote(Path(m.group(1)).stem)}.pdf"',
+        lambda m: f'href="{URL_SHAREPOINT}{os.path.splitext(m.group(1))[0]}.pdf"',
         contenido,
         flags=re.IGNORECASE
     )
     
-    # Reparar rutas de imágenes locales
+    # 2. Mantener rutas originales de imágenes en _archivos
     contenido = re.sub(
-        r'src=["\']((?!https?://|data:)[^"\']*\.(?:jpe?g|png|gif|bmp|svg|webp|ico))["\']',
-        lambda m: f'src="{reparar_ruta_imagen(html_path, m.group(1))}"',
+        r'src=["\']([^"\']*_archivos[\\/][^"\']*\.(?:jpe?g|png|gif|bmp|svg|webp|ico))["\']',
+        lambda m: f'src="{m.group(1).replace("\\", "/")}"',  # Normalizar a /
         contenido,
         flags=re.IGNORECASE
     )
     
     return contenido
 
-def reparar_ruta_imagen(html_path, ruta_img):
-    """Convierte rutas de imágenes a formato absoluto"""
-    # (Mantener la misma implementación anterior)
-    # ...
-
-def copiar_recursos(html_path, output_dir):
-    """Copia toda la estructura _archivos sin modificar"""
-    # Copiar archivo principal (si no es un adjunto)
-    if not es_archivo_adjunto(html_path):
-        shutil.copy2(html_path, output_dir)
+def copiar_estructura_completa(html_path, output_dir):
+    """Copia el archivo HTML y toda su estructura de _archivos"""
+    # Copiar archivo principal
+    shutil.copy2(html_path, output_dir)
     
-    # Copiar carpeta _archivos completa
+    # Copiar carpeta _archivos manteniendo estructura
     html_name = html_path.stem
     carpeta_archivos = html_path.parent / f"{html_name}_archivos"
     
     if carpeta_archivos.exists():
-        dest_dir = output_dir / carpeta_archivos.name
+        dest_dir = output_dir / f"{html_name}_archivos"
         shutil.copytree(carpeta_archivos, dest_dir, dirs_exist_ok=True)
 
 # Proceso principal
-print("Iniciando procesamiento (archivos en _archivos no serán modificados)...")
+print("Iniciando procesamiento manteniendo estructura de imágenes...")
 
-for html_file in CARPETA_HTML.rglob("*.[hH][tT][mM]*"):
-    print(f"\n● Archivo encontrado: {html_file}")
-    
-    if es_archivo_adjunto(html_file):
-        print("  ↳ [Omitido] Es un archivo adjunto")
-        continue
+for html_file in CARPETA_HTML.glob("*.htm*"):
+    if html_file.is_file() and not '_archivos' in str(html_file.parent):
+        print(f"\n● Procesando: {html_file.name}")
         
-    try:
-        contenido = procesar_html(html_file)
-        if contenido:
-            output_path = CARPETA_SALIDA / html_file.name
-            output_path.write_text(contenido, encoding='utf-8')
-            copiar_recursos(html_file, CARPETA_SALIDA)
-            print(f"  ✅ Procesado: {html_file.name}")
-    except Exception as e:
-        print(f"  ❌ Error procesando {html_file.name}: {str(e)}")
+        try:
+            # Procesar HTML
+            contenido = procesar_html(html_file)
+            
+            # Guardar archivo modificado
+            output_html = CARPETA_SALIDA / html_file.name
+            output_html.write_text(contenido, encoding='utf-8')
+            
+            # Copiar estructura completa
+            copiar_estructura_completa(html_file, CARPETA_SALIDA)
+            
+            print(f"  ✅ Archivo procesado: {html_file.name}")
+            print(f"  📁 Carpeta copiada: {html_file.stem}_archivos/")
+        except Exception as e:
+            print(f"  ❌ Error procesando {html_file.name}: {str(e)}")
 
-print("\nProceso completado. Se conservaron todos los archivos en _archivos sin modificaciones.")
+print("\nProceso completado. Estructura completa copiada a:", CARPETA_SALIDA)
+print("Las imágenes deberían mostrarse correctamente manteniendo las rutas relativas.")
