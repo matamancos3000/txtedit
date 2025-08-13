@@ -4,7 +4,7 @@ import urllib.parse
 import shutil
 import os
 
-# Configuración
+# Configuración actualizada
 CARPETA_HTML = Path(r"C:\Users\45056372\Desktop\prueba its")
 CARPETA_SALIDA = Path(r"C:\Users\45056372\Desktop\prueba its\salida")
 URL_SHAREPOINT = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20compartidos/Carpeta/"
@@ -12,40 +12,47 @@ URL_SHAREPOINT = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20comp
 # Crear carpeta de salida
 CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)
 
-def preservar_acentos(texto):
-    """Codifica URLS pero preserva acentos y caracteres especiales"""
-    # Primero codificar los caracteres especiales que necesitan codificación
-    texto_codificado = urllib.parse.quote(texto, safe='áéíóúÁÉÍÓÚñÑüÜ')
-    # Luego decodificar los caracteres que queremos mantener legibles
-    return texto_codificado.replace('%C3%A1', 'á').replace('%C3%A9', 'é').replace('%C3%AD', 'í')\
-                         .replace('%C3%B3', 'ó').replace('%C3%BA', 'ú').replace('%C3%81', 'Á')\
-                         .replace('%C3%89', 'É').replace('%C3%8D', 'Í').replace('%C3%93', 'Ó')\
-                         .replace('%C3%9A', 'Ú').replace('%C3%B1', 'ñ').replace('%C3%91', 'Ñ')\
-                         .replace('%C3%BC', 'ü').replace('%C3%9C', 'Ü')
+def convertir_enlace_seguro(nombre_archivo):
+    """Convierte el nombre del archivo preservando acentos y caracteres especiales"""
+    # Primero obtener el nombre base sin extensión
+    nombre_base = os.path.splitext(nombre_archivo)[0]
+    
+    # Convertir a formato seguro para URL pero manteniendo acentos
+    return urllib.parse.quote(nombre_base, safe='áéíóúÁÉÍÓÚñÑüÜ')
+
+def convertir_enlaces(contenido):
+    """Convierte todos los enlaces .htm/.html a .pdf conservando acentos"""
+    # Patrón mejorado para capturar diferentes formatos de enlaces
+    patron = r'''
+        href=             # Atributo href
+        (["\'])          # Grupo 1: Comilla simple o doble
+        ([^"\']+?\.htm[l]?)  # Grupo 2: Nombre del archivo con extensión .htm o .html
+        \1               # Misma comilla de cierre
+    '''
+    
+    def reemplazar_enlace(match):
+        comilla = match.group(1)
+        nombre_archivo = match.group(2)
+        
+        # Extraer solo el nombre del archivo sin ruta
+        nombre_archivo = os.path.basename(nombre_archivo)
+        
+        # Convertir a formato seguro conservando acentos
+        nombre_base = convertir_enlace_seguro(nombre_archivo)
+        
+        # Construir nuevo enlace
+        return f'href={comilla}{URL_SHAREPOINT}{nombre_base}.pdf{comilla}'
+    
+    return re.sub(patron, reemplazar_enlace, contenido, flags=re.IGNORECASE | re.VERBOSE)
 
 def procesar_html(html_path):
-    """Procesa el HTML conservando acentos y convirtiendo enlaces"""
-    # Leer conservando encoding original
+    """Procesa el archivo HTML conservando acentos"""
+    # Leer con encoding UTF-8 explícito
     with open(html_path, 'r', encoding='utf-8') as f:
         contenido = f.read()
     
-    # Función para convertir enlaces conservando acentos
-    def convertir_enlace(match):
-        comilla = match.group(1)
-        nombre_archivo = match.group(2)
-        nombre_base = os.path.splitext(nombre_archivo)[0]
-        nombre_seguro = preservar_acentos(nombre_base)
-        return f'href={comilla}{URL_SHAREPOINT}{nombre_seguro}.pdf{comilla}'
-    
     # Convertir enlaces .htm/.html a .pdf
-    contenido = re.sub(
-        r'href=(["\'])([^"\']*\.htm[l]?)(["\'])',
-        convertir_enlace,
-        contenido,
-        flags=re.IGNORECASE
-    )
-    
-    return contenido
+    return convertir_enlaces(contenido)
 
 def copiar_estructura(html_path, output_dir):
     """Copia el archivo y su estructura adjunta"""
@@ -68,23 +75,26 @@ for html_file in CARPETA_HTML.glob("*.[hH][tT][mM]*"):
         print(f"\n● Procesando: {html_file.name}")
         
         try:
-            # Paso 1: Procesar conservando acentos
+            # Paso 1: Procesar el archivo HTML
             contenido = procesar_html(html_file)
             
-            # Paso 2: Guardar con encoding UTF-8
+            # Paso 2: Guardar el archivo modificado
             output_path = CARPETA_SALIDA / html_file.name
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(contenido)
             
-            # Paso 3: Copiar estructura adjunta
+            # Paso 3: Copiar archivos adjuntos
             copiar_estructura(html_file, CARPETA_SALIDA)
             
-            # Mostrar ejemplo
-            ejemplo = re.search(r'href=["\'][^"\']*á[^"\']*\.pdf["\']', contenido)
-            if ejemplo:
-                print(f"  ✅ Enlace con acento modificado: {ejemplo.group()[:60]}...")
+            # Mostrar ejemplo de cambio
+            enlaces = re.findall(r'href=["\'][^"\']*\.pdf["\']', contenido)
+            if enlaces:
+                print(f"  ✅ Enlace modificado: {enlaces[0][:70]}...")
+                # Verificar conservación de acentos
+                if any(c in enlaces[0] for c in ['á', 'é', 'í', 'ó', 'ú', 'ñ']):
+                    print("  ✔ Se conservaron acentos correctamente")
             else:
-                print("  ✅ Archivo procesado (sin acentos detectados)")
+                print("  ⚠ No se encontraron enlaces .htm/.html para convertir")
                 
         except Exception as e:
             print(f"  ❌ Error procesando {html_file.name}: {str(e)}")
