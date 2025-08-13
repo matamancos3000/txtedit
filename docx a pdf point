@@ -34,19 +34,18 @@ def convertir_enlaces(contenido):
     return re.sub(patron, reemplazar_enlace, contenido, flags=re.IGNORECASE | re.VERBOSE)
 
 def procesar_html(html_path):
-    """Procesa el archivo HTML cambiando solo los enlaces .htm/.html"""
+    """Lee el HTML en su codificación original y devuelve el contenido y la codificación detectada"""
+    encoding_detectado = 'utf-8'
     try:
-        # Intentar UTF-8
         with open(html_path, 'r', encoding='utf-8') as f:
             contenido = f.read()
     except UnicodeDecodeError:
-        # Si falla, usar Latin-1 (mantiene acentos y caracteres especiales)
+        encoding_detectado = 'latin-1'
         with open(html_path, 'r', encoding='latin-1') as f:
             contenido = f.read()
     
-    # Convertir enlaces
     contenido_modificado = convertir_enlaces(contenido)
-    return contenido_modificado
+    return contenido_modificado, encoding_detectado
 
 def copiar_estructura(html_path, output_dir):
     """Copia el archivo HTML y su carpeta de recursos asociada"""
@@ -69,12 +68,12 @@ for html_file in CARPETA_HTML.glob("*.[hH][tT][mM]*"):
         print(f"\n● Procesando: {html_file.name}")
         
         try:
-            # Procesar HTML
-            contenido = procesar_html(html_file)
+            # Procesar HTML y obtener codificación original
+            contenido, encoding_original = procesar_html(html_file)
             
-            # Guardar archivo modificado
+            # Guardar usando la misma codificación
             output_path = CARPETA_SALIDA / html_file.name
-            output_path.write_text(contenido, encoding='utf-8')
+            output_path.write_text(contenido, encoding=encoding_original)
             
             # Copiar estructura asociada
             copiar_estructura(html_file, CARPETA_SALIDA)
