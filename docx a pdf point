@@ -12,39 +12,34 @@ URL_SHAREPOINT = "https://tubanco.sharepoint.com/sites/misitio/Documentos%20comp
 # Crear carpeta de salida
 CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)
 
-def convertir_enlace_seguro(nombre_archivo):
-    """Convierte el nombre del archivo preservando acentos y caracteres especiales"""
-    # Primero obtener el nombre base sin extensión
-    nombre_base = os.path.splitext(nombre_archivo)[0]
-    
-    # Codificar solo los caracteres que realmente necesitan codificación en URLs
-    # Manteniendo acentos y caracteres especiales legibles
-    partes = []
-    for char in nombre_base:
-        if char.isalnum() or char in ('-', '_', '.', '~'):
-            partes.append(char)
-        else:
-            partes.append(urllib.parse.quote(char, safe=''))
-    
-    return ''.join(partes)
+def preservar_acentos(texto):
+    """Codifica URLS pero preserva acentos y caracteres especiales"""
+    # Primero codificar los caracteres especiales que necesitan codificación
+    texto_codificado = urllib.parse.quote(texto, safe='áéíóúÁÉÍÓÚñÑüÜ')
+    # Luego decodificar los caracteres que queremos mantener legibles
+    return texto_codificado.replace('%C3%A1', 'á').replace('%C3%A9', 'é').replace('%C3%AD', 'í')\
+                         .replace('%C3%B3', 'ó').replace('%C3%BA', 'ú').replace('%C3%81', 'Á')\
+                         .replace('%C3%89', 'É').replace('%C3%8D', 'Í').replace('%C3%93', 'Ó')\
+                         .replace('%C3%9A', 'Ú').replace('%C3%B1', 'ñ').replace('%C3%91', 'Ñ')\
+                         .replace('%C3%BC', 'ü').replace('%C3%9C', 'Ü')
 
 def procesar_html(html_path):
-    """Procesa el HTML cambiando enlaces .htm/.html a .pdf conservando acentos"""
-    with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
+    """Procesa el HTML conservando acentos y convirtiendo enlaces"""
+    # Leer conservando encoding original
+    with open(html_path, 'r', encoding='utf-8') as f:
         contenido = f.read()
     
-    # Función para convertir enlaces .htm/.html a .pdf conservando acentos
+    # Función para convertir enlaces conservando acentos
     def convertir_enlace(match):
         comilla = match.group(1)
         nombre_archivo = match.group(2)
-        nombre_seguro = convertir_enlace_seguro(nombre_archivo)
+        nombre_base = os.path.splitext(nombre_archivo)[0]
+        nombre_seguro = preservar_acentos(nombre_base)
         return f'href={comilla}{URL_SHAREPOINT}{nombre_seguro}.pdf{comilla}'
     
-    # Patrón mejorado para detectar enlaces
-    patron = r'href=(["\'])([^"\']*\.htm[l]?)(["\'])'
-    
+    # Convertir enlaces .htm/.html a .pdf
     contenido = re.sub(
-        patron,
+        r'href=(["\'])([^"\']*\.htm[l]?)(["\'])',
         convertir_enlace,
         contenido,
         flags=re.IGNORECASE
@@ -66,30 +61,31 @@ def copiar_estructura(html_path, output_dir):
         shutil.copytree(carpeta_archivos, dest_dir, dirs_exist_ok=True)
 
 # Proceso principal
-print("Iniciando conversión conservando acentos y caracteres especiales...")
+print("Iniciando conversión conservando acentos...")
 
 for html_file in CARPETA_HTML.glob("*.[hH][tT][mM]*"):
     if html_file.is_file() and '_archivos' not in str(html_file.parent):
         print(f"\n● Procesando: {html_file.name}")
         
         try:
-            # Procesar HTML
+            # Paso 1: Procesar conservando acentos
             contenido = procesar_html(html_file)
             
-            # Guardar archivo modificado
+            # Paso 2: Guardar con encoding UTF-8
             output_path = CARPETA_SALIDA / html_file.name
-            output_path.write_text(contenido, encoding='utf-8')
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(contenido)
             
-            # Copiar estructura adjunta
+            # Paso 3: Copiar estructura adjunta
             copiar_estructura(html_file, CARPETA_SALIDA)
             
-            # Mostrar ejemplo de enlace modificado
-            enlaces_modificados = re.findall(r'href=["\'][^"\']*\.pdf["\']', contenido)
-            if enlaces_modificados:
-                primer_enlace = enlaces_modificados[0]
-                print(f"  ✅ Enlace modificado: {primer_enlace[:100]}...")
-                print(f"  🔍 ¿Se conservan los acentos?: {'áéíóú' in primer_enlace}")
-            
+            # Mostrar ejemplo
+            ejemplo = re.search(r'href=["\'][^"\']*á[^"\']*\.pdf["\']', contenido)
+            if ejemplo:
+                print(f"  ✅ Enlace con acento modificado: {ejemplo.group()[:60]}...")
+            else:
+                print("  ✅ Archivo procesado (sin acentos detectados)")
+                
         except Exception as e:
             print(f"  ❌ Error procesando {html_file.name}: {str(e)}")
 
