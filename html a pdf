@@ -1,0 +1,124 @@
+import re
+from pathlib import Path
+import urllib.parse
+import shutil
+import os
+import csv
+
+# ================== CONFIGURACIÓN ==================
+CARPETA_TRABAJANDO = "documentos_apoyo_uso_comun"
+CARPETA_DE_RECURSOS = "Formatos2021"
+
+CARPETA_HTML = Path(fr"C:\Users\45056372\Desktop\prueba its\{CARPETA_TRABAJANDO}")
+CARPETA_SALIDA = Path(fr"C:\Users\45056372\Desktop\prueba its\{CARPETA_TRABAJANDO}")
+
+URL_SHAREPOINT = "https://teams.global.hsbc/sites/labpspyas-2019/CALIDAD20251/"
+
+# Crear carpeta de salida
+CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)
+
+# Archivo de log
+LOG_CSV = CARPETA_SALIDA / "log_cambios.csv"
+
+# ================== FUNCIONES ==================
+def convertir_enlaces(contenido):
+    """Convierte enlaces HTML, DOCX, PDF, XLSX, PPTX a las rutas correspondientes"""
+    cambios = []  # aquí se guardan los enlaces modificados
+    
+    def reemplazar_enlace(match):
+        comilla = match.group(1)
+        nombre_archivo = match.group(2)
+        nombre_base, extension = os.path.splitext(os.path.basename(nombre_archivo))
+        extension = extension.lower()
+        
+        if extension in [".htm", ".html"]:
+            nuevo = f'{URL_SHAREPOINT}{CARPETA_TRABAJANDO}/{urllib.parse.quote(nombre_base)}.pdf'
+            cambios.append((nombre_archivo, nuevo))
+            return f'href={comilla}{nuevo}{comilla}'
+        
+        elif extension in [".docx", ".pdf", ".xlsx", ".pptx"]:
+            nuevo = f'{URL_SHAREPOINT}{CARPETA_DE_RECURSOS}/{urllib.parse.quote(nombre_base + extension)}'
+            cambios.append((nombre_archivo, nuevo))
+            return f'href={comilla}{nuevo}{comilla}'
+        
+        else:
+            return match.group(0)
+
+    patron = r'''
+        href=                 
+        (["\'])               
+        ([^"\']+\.(?:htm[l]?|docx|pdf|xlsx|pptx))  
+        \1
+        '''
+    
+    nuevo_contenido = re.sub(patron, reemplazar_enlace, contenido, flags=re.IGNORECASE | re.VERBOSE)
+    return nuevo_contenido, cambios
+
+
+def procesar_html(html_path):
+    """Lee el HTML, convierte enlaces y devuelve contenido, codificación y cambios detectados"""
+    encoding_detectado = 'utf-8'
+    try:
+        with open(html_path, 'r', encoding='utf-8') as f:
+            contenido = f.read()
+    except UnicodeDecodeError:
+        encoding_detectado = 'latin-1'
+        with open(html_path, 'r', encoding='latin-1') as f:
+            contenido = f.read()
+    
+    contenido_modificado, cambios = convertir_enlaces(contenido)
+    return contenido_modificado, encoding_detectado, cambios
+
+
+def copiar_estructura(html_path, output_dir):
+    """Copia el archivo HTML y su carpeta de recursos asociada"""
+    shutil.copy2(html_path, output_dir)  # Copia archivo principal
+    
+    html_name = html_path.stem
+    carpeta_archivos = html_path.parent / f"{html_name}_archivos"
+    
+    if carpeta_archivos.exists():
+        dest_dir = output_dir / f"{html_name}_archivos"
+        shutil.copytree(carpeta_archivos, dest_dir, dirs_exist_ok=True)
+
+
+def registrar_cambios(archivo_html, cambios):
+    """Registra los cambios en un archivo CSV"""
+    existe = LOG_CSV.exists()
+    with open(LOG_CSV, 'a', newline='', encoding='utf-8') as csvfile:
+        writer = csv.writer(csvfile)
+        if not existe:
+            writer.writerow(["Archivo HTML", "Enlace original", "Enlace nuevo"])
+        
+        for original, nuevo in cambios:
+            writer.writerow([archivo_html, original, nuevo])
+
+# ================== PROCESO PRINCIPAL ==================
+print("Iniciando conversión y registro en CSV...")
+
+for html_file in CARPETA_HTML.glob("*.[hH][tT][mM]*"):
+    if html_file.is_file() and '_archivos' not in str(html_file.parent):
+        print(f"\n● Procesando: {html_file.name}")
+        
+        try:
+            contenido, encoding_original, cambios = procesar_html(html_file)
+            
+            # Guardar usando la misma codificación
+            output_path = CARPETA_SALIDA / html_file.name
+            output_path.write_text(contenido, encoding=encoding_original)
+            
+            # Copiar estructura asociada
+            copiar_estructura(html_file, CARPETA_SALIDA)
+            
+            # Registrar cambios en CSV
+            if cambios:
+                registrar_cambios(html_file.name, cambios)
+                print(f"   {len(cambios)} enlace(s) modificado(s). Registrados en log_cambios.csv")
+            else:
+                print("  ⚠️ No se encontraron enlaces relevantes para convertir")
+                
+        except Exception as e:
+            print(f"  ⚠️ Error procesando {html_file.name}: {str(e)}")
+
+print("\n✔ Proceso completado. Archivos en:", CARPETA_SALIDA)
+print("📑 Log de cambios en:", LOG_CSV)
