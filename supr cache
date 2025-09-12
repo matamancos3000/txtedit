@@ -1,0 +1,22 @@
+@echo off
+echo ============================
+echo  LIMPIEZA DE WINDOWS 10
+echo ============================
+echo.
+
+echo Vaciando papelera de reciclaje...
+PowerShell.exe -NoProfile -Command "Clear-RecycleBin -Force"
+
+echo Limpiando cache de usuario...
+del /s /q %temp%\* >nul 2>&1
+rd /s /q %temp% >nul 2>&1
+md %temp%
+
+echo Limpiando cache de Windows...
+del /s /q C:\Windows\Temp\* >nul 2>&1
+rd /s /q C:\Windows\Temp >nul 2>&1
+md C:\Windows\Temp
+
+echo.
+echo ✅ Limpieza completada
+pause
