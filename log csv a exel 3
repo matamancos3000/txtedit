@@ -4,15 +4,12 @@ import re
 from datetime import datetime, timedelta
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill
-from openpyxl.chart import BarChart, Reference
+from openpyxl.chart import PieChart, BarChart, Reference
 
 # === CONFIGURACIÓN ===
-INPUT_DIR = r"C:\Logs-Reporttoken"  # Carpeta de entrada con CSV
-OUTPUT_DIR = r"C:\Logs-Reporttoken\CSV-procesado"  # Carpeta para CSVs procesados
-OUTPUT_DIR_EXCEL = r"C:\Logs-Reporttoken\Reporte-procesado"  # Carpeta para Excels procesados
-
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(OUTPUT_DIR_EXCEL, exist_ok=True)
+input_folder = r"C:\Logs-Reporttoken"
+output_folder = r"C:\Logs-Reporttoken\Procesados"
+os.makedirs(output_folder, exist_ok=True)
 
 # === FUNCIONES AUXILIARES ===
 def parse_fecha_trabajo(valor):
@@ -75,13 +72,12 @@ def limpiar_detalles(texto):
     return texto
 
 # === PROCESAR TODOS LOS CSV ===
-for file in os.listdir(INPUT_DIR):
+for file in os.listdir(input_folder):
     if not file.lower().endswith(".csv"):
         continue
 
-    input_file = os.path.join(INPUT_DIR, file)
-    output_csv = os.path.join(OUTPUT_DIR, file.replace(".csv", "-procesado.csv"))
-    output_excel = os.path.join(OUTPUT_DIR_EXCEL, file.replace(".csv", "-procesado.xlsx"))
+    input_file = os.path.join(input_folder, file)
+    output_file = os.path.join(output_folder, file.replace(".csv", "-procesado.xlsx"))
 
     print(f"🔄 Procesando {file}...")
 
@@ -127,11 +123,8 @@ for file in os.listdir(INPUT_DIR):
     resumen_detalles = df["DETALLES"].value_counts().reset_index()
     resumen_detalles.columns = ["DETALLES", "Cantidad"]
 
-    # === EXPORTAR CSV ===
-    df.to_csv(output_csv, index=False, encoding="utf-8-sig")
-
-    # === EXPORTAR EXCEL ===
-    with pd.ExcelWriter(output_excel, engine="openpyxl",
+    # === EXPORTAR ===
+    with pd.ExcelWriter(output_file, engine="openpyxl",
                         date_format="DD/MM/YYYY HH:MM:SS",
                         datetime_format="DD/MM/YYYY HH:MM:SS") as writer:
         df.to_excel(writer, sheet_name="Logs", index=False)
@@ -139,7 +132,7 @@ for file in os.listdir(INPUT_DIR):
         resumen_detalles.to_excel(writer, sheet_name="Resumen", startrow=pivot.shape[0] + 4, index=False)
 
     # === ESTILOS Y GRAFICAS ===
-    wb = load_workbook(output_excel)
+    wb = load_workbook(output_file)
 
     # Hoja Logs → encabezados
     ws_logs = wb["Logs"]
@@ -166,5 +159,5 @@ for file in os.listdir(INPUT_DIR):
     chart.x_axis.title = "Fecha"
     ws_resumen.add_chart(chart, f"I2")
 
-    wb.save(output_excel)
-    print(f"✅ Archivos generados: {output_csv} y {output_excel}")
+    wb.save(output_file)
+    print(f"✅ Archivo generado: {output_file}")
