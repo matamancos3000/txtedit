@@ -1,0 +1,81 @@
+import os
+import pandas as pd
+from datetime import datetime, timedelta
+
+# === CONFIGURACIÓN ===
+input_file = r"C:\Logs-Reporttoken\log-consentrado-JULIO-AGOSTO-SEPTIEMBRE.csv"
+output_file = input_file.replace(".csv", "-procesado.csv")
+
+# === LEER ARCHIVO ===
+df = pd.read_csv(input_file, encoding="utf-8-sig")
+
+# === PARSEAR FECHAS ===
+# CreatedOn → formato "SEP 19 2025 7:06AM"
+df["CreatedOn"] = pd.to_datetime(df["CreatedOn"], format="%b %d %Y %I:%M%p", errors="coerce")
+
+# Ajustar 6 horas hacia adelante
+df["CreatedOn"] = df["CreatedOn"] + timedelta(hours=6)
+
+# FECHA DE TRABAJO → formato "dd/MM/yyyy HH:mm"
+df["FECHA DE TRABAJO"] = pd.to_datetime(df["FECHA DE TRABAJO"], format="%d/%m/%Y %H:%M", errors="coerce")
+
+# === CALCULAR MINUTOS DE RESPUESTA ===
+def calcular_minutos(row):
+    created = row["CreatedOn"]
+    trabajado = row["FECHA DE TRABAJO"]
+
+    # Si alguna fecha está vacía
+    if pd.isna(created) or pd.isna(trabajado):
+        return None
+
+    # Revisar si está en horario de inactividad (22:00 a 06:00)
+    if created.hour >= 22 or created.hour < 6:
+        return "Horario bot inactivo"
+
+    # Diferencia en minutos
+    diff = (trabajado - created).total_seconds() / 60
+    return round(diff)
+
+df["Minutos de respuesta"] = df.apply(calcular_minutos, axis=1)
+
+# === CLASIFICAR INTERVALOS DE TIEMPO ===
+def clasificar_intervalo(valor):
+    if isinstance(valor, str):  # ya tiene "Horario bot inactivo"
+        return valor
+    if pd.isna(valor):
+        return None
+    if valor < 10:
+        return "menos de 10 minutos"
+    elif 11 <= valor <= 20:
+        return "de 11 a 20 minutos"
+    elif 21 <= valor <= 30:
+        return "de 21 a 30 minutos"
+    elif 31 <= valor <= 60:
+        return "de 30 a 60 minutos"
+    else:
+        return "más de 60 minutos"
+
+df["Intervalo"] = df["Minutos de respuesta"].apply(clasificar_intervalo)
+
+# === HOMOGENEIZAR DETALLES ===
+def limpiar_detalles(texto):
+    if not isinstance(texto, str):
+        return texto
+    texto = texto.strip()
+
+    if texto.startswith("El restablecimiento fuera de linea no se pudo completar por estado: 'Aprobado'"):
+        return "Aprobado por otro medio"
+    elif texto.startswith("El restablecimiento fuera de linea no se pudo completar por estado:"):
+        return "No tiene Solicitud vigente"
+    elif texto.startswith("Error de sistema"):
+        return "Error de sistema"
+    elif texto.startswith("Productos y servicios"):
+        return "Error en obtener registro por voz"
+    return texto  # dejar tal cual si no coincide
+
+df["DETALLES"] = df["DETALLES"].apply(limpiar_detalles)
+
+# === GUARDAR RESULTADO ===
+df.to_csv(output_file, index=False, encoding="utf-8-sig")
+
+print(f"\n✅ Archivo procesado generado en: {output_file}")
