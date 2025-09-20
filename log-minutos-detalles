@@ -16,19 +16,28 @@ df["CreatedOn"] = pd.to_datetime(df["CreatedOn"], format="%b %d %Y %I:%M%p", err
 # Ajustar 6 horas hacia adelante
 df["CreatedOn"] = df["CreatedOn"] + timedelta(hours=6)
 
-# FECHA DE TRABAJO → formato "dd/MM/yyyy HH:mm"
-df["FECHA DE TRABAJO"] = pd.to_datetime(df["FECHA DE TRABAJO"], format="%d/%m/%Y %H:%M", errors="coerce")
+# FECHA DE TRABAJO → puede tener HH:mm o HH:mm:ss
+def parse_fecha_trabajo(valor):
+    if pd.isna(valor):
+        return None
+    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"):
+        try:
+            return datetime.strptime(valor, fmt)
+        except:
+            continue
+    return None
+
+df["FECHA DE TRABAJO"] = df["FECHA DE TRABAJO"].astype(str).apply(parse_fecha_trabajo)
 
 # === CALCULAR MINUTOS DE RESPUESTA ===
 def calcular_minutos(row):
     created = row["CreatedOn"]
     trabajado = row["FECHA DE TRABAJO"]
 
-    # Si alguna fecha está vacía
-    if pd.isna(created) or pd.isna(trabajado):
+    if pd.isna(created) or trabajado is None:
         return None
 
-    # Revisar si está en horario de inactividad (22:00 a 06:00)
+    # Revisar horario inactivo
     if created.hour >= 22 or created.hour < 6:
         return "Horario bot inactivo"
 
@@ -38,7 +47,7 @@ def calcular_minutos(row):
 
 df["Minutos de respuesta"] = df.apply(calcular_minutos, axis=1)
 
-# === CLASIFICAR INTERVALOS DE TIEMPO ===
+# === CLASIFICAR INTERVALOS ===
 def clasificar_intervalo(valor):
     if isinstance(valor, str):  # ya tiene "Horario bot inactivo"
         return valor
@@ -71,7 +80,7 @@ def limpiar_detalles(texto):
         return "Error de sistema"
     elif texto.startswith("Productos y servicios"):
         return "Error en obtener registro por voz"
-    return texto  # dejar tal cual si no coincide
+    return texto
 
 df["DETALLES"] = df["DETALLES"].apply(limpiar_detalles)
 
