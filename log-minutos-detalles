@@ -1,20 +1,19 @@
 import os
 import pandas as pd
+import re
 from datetime import datetime, timedelta
 
 # === CONFIGURACIÓN ===
 input_file = r"C:\Logs-Reporttoken\log-consentrado-JULIO-AGOSTO-SEPTIEMBRE.csv"
-output_file = input_file.replace(".csv", "-procesado.csv")
+output_file = input_file.replace(".csv", "-procesado.xlsx")
 
 # === LEER ARCHIVO ===
-df = pd.read_csv(input_file, encoding="utf-8-sig")
+df = pd.read_csv(input_file, encoding="utf-8-sig", dtype={"MSISDN": str})
 
 # === PARSEAR FECHAS ===
 # CreatedOn → formato "SEP 19 2025 7:06AM"
 df["CreatedOn"] = pd.to_datetime(df["CreatedOn"], format="%b %d %Y %I:%M%p", errors="coerce")
-
-# Ajustar 6 horas hacia adelante
-df["CreatedOn"] = df["CreatedOn"] + timedelta(hours=6)
+df["CreatedOn"] = df["CreatedOn"] + timedelta(hours=6)  # ajuste de 6 horas
 
 # FECHA DE TRABAJO → puede tener HH:mm o HH:mm:ss
 def parse_fecha_trabajo(valor):
@@ -28,6 +27,19 @@ def parse_fecha_trabajo(valor):
     return None
 
 df["FECHA DE TRABAJO"] = df["FECHA DE TRABAJO"].astype(str).apply(parse_fecha_trabajo)
+
+# FECHA DE NACIMIENTO → dd/MM/yyyy HH:mm o dd/MM/yyyy
+def parse_fecha_nac(valor):
+    if pd.isna(valor):
+        return None
+    for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(valor, fmt)
+        except:
+            continue
+    return None
+
+df["FECHA DE NACIMIENTO"] = df["FECHA DE NACIMIENTO"].astype(str).apply(parse_fecha_nac)
 
 # === CALCULAR MINUTOS DE RESPUESTA ===
 def calcular_minutos(row):
@@ -66,25 +78,26 @@ def clasificar_intervalo(valor):
 
 df["Intervalo"] = df["Minutos de respuesta"].apply(clasificar_intervalo)
 
-# === HOMOGENEIZAR DETALLES ===
+# === HOMOGENEIZAR DETALLES (regex) ===
 def limpiar_detalles(texto):
     if not isinstance(texto, str):
         return texto
     texto = texto.strip()
 
-    if texto.startswith("El restablecimiento fuera de linea no se pudo completar por estado: 'Aprobado'"):
+    if re.match(r"^El restablecimiento fuera de linea no se pudo completar por estado: 'Aprobado'", texto):
         return "Aprobado por otro medio"
-    elif texto.startswith("El restablecimiento fuera de linea no se pudo completar por estado:"):
+    elif re.match(r"^El restablecimiento fuera de linea no se pudo completar por estado:", texto):
         return "No tiene Solicitud vigente"
-    elif texto.startswith("Error de sistema"):
+    elif re.match(r"^Error de sistema.*", texto):
         return "Error de sistema"
-    elif texto.startswith("Productos y servicios"):
+    elif re.match(r"^Productos y servicios.*", texto):
         return "Error en obtener registro por voz"
     return texto
 
 df["DETALLES"] = df["DETALLES"].apply(limpiar_detalles)
 
-# === GUARDAR RESULTADO ===
-df.to_csv(output_file, index=False, encoding="utf-8-sig")
+# === EXPORTAR A EXCEL ===
+with pd.ExcelWriter(output_file, engine="openpyxl", date_format="DD/MM/YYYY HH:MM:SS", datetime_format="DD/MM/YYYY HH:MM:SS") as writer:
+    df.to_excel(writer, sheet_name="Logs", index=False)
 
 print(f"\n✅ Archivo procesado generado en: {output_file}")
