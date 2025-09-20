@@ -1,184 +1,170 @@
 import os
-import time
 import pandas as pd
-from datetime import datetime
-from dateutil.relativedelta import relativedelta
-import locale
 import re
+from datetime import datetime, timedelta
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.chart import BarChart, Reference
 
-# ================= CONFIGURACIÓN =================
-# Número de meses a incluir (ejemplo: 3 = mes actual y 2 anteriores)
-NUM_MESES = 3
+# === CONFIGURACIÓN ===
+INPUT_DIR = r"C:\Logs-Reporttoken"  # Carpeta de entrada con CSV
+OUTPUT_DIR = r"C:\Logs-Reporttoken\CSV-procesado"  # Carpeta para CSVs procesados
+OUTPUT_DIR_EXCEL = r"C:\Logs-Reporttoken\Reporte-procesado"  # Carpeta para Excels procesados
 
-# Carpeta de salida (puedes cambiarla aquí si quieres otra)
-OUTPUT_DIR = r"C:\Logs-Reporttoken"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR_EXCEL, exist_ok=True)
 
-# Carpeta base de entornos (ajusta si cambia la estructura)
-BASE_PATHS = {
-    "DEV": r"..\DEV\Output\Log",
-    "UAT": r"..\UAT\Output\Log",
-    "PROD": r"..\PROD\Output\Log"
-}
+# === FUNCIONES AUXILIARES ===
+def parse_fecha_trabajo(valor):
+    if pd.isna(valor):
+        return None
+    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"):
+        try:
+            return datetime.strptime(str(valor), fmt)
+        except:
+            continue
+    return None
 
-# Locale para nombres de meses en español
-try:
-    locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")  # Linux/Mac
-except:
-    locale.setlocale(locale.LC_TIME, "Spanish_Spain")  # Windows
+def parse_fecha_nac(valor):
+    if pd.isna(valor):
+        return None
+    valor = str(valor).lower().replace("a. m.", "AM").replace("p. m.", "PM")
+    for fmt in ("%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %I:%M %p", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(valor, fmt)
+        except:
+            continue
+    return None
 
-# Encabezados esperados
-HEADERS = [
-    "Entorno","FECHA","ProgramID","TaskID","MessageID","MSISDN","OperatorID","MOContent1",
-    "ContentType","CreatedOn","Cell Number","CIS","FECHA DE NACIMIENTO","TIPO DE CAMPAÑA",
-    "FECHA DE TRABAJO","ESTATUS","DETALLES"
-]
+def calcular_minutos(row):
+    created, trabajado = row.get("CreatedOn"), row.get("FECHA DE TRABAJO")
+    if pd.isna(created) or trabajado is None:
+        return None
+    if created.hour >= 22 or created.hour < 6:
+        return "Horario bot inactivo"
+    return round((trabajado - created).total_seconds() / 60)
 
-# ================= FUNCIÓN 1: CONSOLIDAR CSV =================
-def consolidar_csv():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    df_final = pd.DataFrame(columns=HEADERS)
-    now = datetime.now()
+def clasificar_intervalo(valor):
+    if isinstance(valor, str):
+        return valor
+    if pd.isna(valor):
+        return None
+    if valor <= 10:
+        return "menos de 10 minutos"
+    elif valor <= 20:
+        return "de 11 a 20 minutos"
+    elif valor <= 30:
+        return "de 21 a 30 minutos"
+    elif valor <= 60:
+        return "de 30 a 60 minutos"
+    else:
+        return "más de 60 minutos"
 
-    # Lista de meses a incluir
-    meses_a_incluir = []
-    for i in range(NUM_MESES):
-        fecha_mes = now - relativedelta(months=i)
-        meses_a_incluir.append((fecha_mes.strftime("%Y"), fecha_mes.strftime("%B").upper()))
-
-    print(f"Procesando meses: {meses_a_incluir}")
-
-    for entorno, base_path in BASE_PATHS.items():
-        for year, month in meses_a_incluir:
-            file_path = os.path.join(base_path, year, month, "log.csv")
-            if os.path.exists(file_path):
-                try:
-                    df = pd.read_csv(file_path, encoding="latin1", usecols=range(16), on_bad_lines="skip")
-                    df.insert(0, "Entorno", entorno)
-                    df.columns = HEADERS
-                    df_final = pd.concat([df_final, df], ignore_index=True)
-                    print(f"✔ Procesado: {file_path}")
-                except Exception as e:
-                    print(f"⚠ Error leyendo {file_path}: {e}")
-            else:
-                print(f"❌ No existe: {file_path}")
-
-    meses_texto = "-".join([m for _, m in meses_a_incluir[::-1]])
-    output_file = os.path.join(OUTPUT_DIR, f"log-consentrado-{meses_texto}.csv")
-
-    df_final.to_csv(output_file, index=False, encoding="utf-8-sig")
-    print(f"\n✅ Archivo concentrado generado en: {output_file}")
-    return output_file
-
-
-# ================= FUNCIÓN 2: TRANSFORMAR A EXCEL =================
-def transformar_excel(input_csv):
-    df = pd.read_csv(input_csv, encoding="utf-8-sig")
-
-    # Forzar MSISDN como texto
-    df["MSISDN"] = df["MSISDN"].astype(str)
-
-    # Normalizar fechas
-    def parse_date(value):
-        for fmt in ["%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y"]:
-            try:
-                return datetime.strptime(str(value), fmt)
-            except:
-                continue
-        return pd.NaT
-
-    df["FECHA"] = df["FECHA"].apply(parse_date)
-    df["FECHA DE NACIMIENTO"] = df["FECHA DE NACIMIENTO"].apply(parse_date)
-    df["FECHA DE TRABAJO"] = df["FECHA DE TRABAJO"].apply(parse_date)
-
-    # Normalizar DETALLES
-    def normalizar_detalles(texto):
-        if pd.isna(texto): 
-            return texto
-        texto = str(texto)
-        if re.match(r"^El restablecimiento fuera de linea no se pudo completar por estado:\s*'Aprobado'", texto, re.IGNORECASE):
-            return "Aprobado por otro medio"
-        elif re.match(r"^El restablecimiento fuera de linea no se pudo completar por estado:.*", texto, re.IGNORECASE):
-            return "No tiene Solicitud vigente"
-        elif re.search(r"Error de sistema", texto, re.IGNORECASE):
-            return "Error de sistema"
-        elif re.search(r"Productos y servicios", texto, re.IGNORECASE):
-            return "Error en obtener registro por voz"
+def limpiar_detalles(texto):
+    if not isinstance(texto, str):
         return texto
+    texto = texto.strip()
+    if re.match(r"^El restablecimiento fuera de línea no se pudo completar por estado: 'Aprobado'", texto, re.IGNORECASE):
+        return "Aprobado por otro medio"
+    elif re.match(r"^El restablecimiento fuera de línea no se pudo completar por estado:", texto, re.IGNORECASE):
+        return "No tiene Solicitud vigente"
+    elif re.search(r"Error de sistema", texto, re.IGNORECASE):
+        return "Error de sistema"
+    elif re.match(r"^Productos y Servicios.*", texto, re.IGNORECASE):
+        return "Error en obtener registro por voz"
+    return texto
 
-    df["DETALLES"] = df["DETALLES"].apply(normalizar_detalles)
+# === PROCESAR TODOS LOS CSV ===
+for file in os.listdir(INPUT_DIR):
+    if not file.lower().endswith(".csv"):
+        continue
 
-    # Guardar a Excel
-    output_excel = input_csv.replace(".csv", ".xlsx")
-    df.to_excel(output_excel, index=False, sheet_name="Datos")
+    input_file = os.path.join(INPUT_DIR, file)
+    output_csv = os.path.join(OUTPUT_DIR, file.replace(".csv", "-procesado.csv"))
+    output_excel = os.path.join(OUTPUT_DIR_EXCEL, file.replace(".csv", "-procesado.xlsx"))
 
-    wb = load_workbook(output_excel)
-    ws = wb["Datos"]
+    print(f"🔄 Procesando {file}...")
 
-    # Estilo encabezados
-    for cell in ws[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+    # === LEER ARCHIVO ===
+    df = pd.read_csv(input_file, encoding="utf-8-sig", dtype={"MSISDN": str})
 
-    # === Crear hoja Resumen ===
-    resumen = wb.create_sheet("Resumen")
+    # Validar columnas mínimas
+    columnas_necesarias = ["CreatedOn", "FECHA DE TRABAJO", "FECHA DE NACIMIENTO", "DETALLES"]
+    for col in columnas_necesarias:
+        if col not in df.columns:
+            raise ValueError(f"❌ Falta la columna requerida: {col}")
 
-    # Resumen por día y rangos de tiempo
-    df_resumen = df.copy()
-    df_resumen = df_resumen.dropna(subset=["FECHA","FECHA DE TRABAJO"])
-    df_resumen["diff_min"] = (df_resumen["FECHA DE TRABAJO"] - df_resumen["FECHA"]).dt.total_seconds() / 60
+    # === PARSEAR FECHAS ===
+    df["CreatedOn"] = pd.to_datetime(df["CreatedOn"], format="%b %d %Y %I:%M%p", errors="coerce") + timedelta(hours=6)
+    df["FECHA DE TRABAJO"] = df["FECHA DE TRABAJO"].apply(parse_fecha_trabajo)
+    df["FECHA DE NACIMIENTO"] = df["FECHA DE NACIMIENTO"].apply(parse_fecha_nac)
 
-    def clasificar_tiempo(minutos):
-        if pd.isna(minutos): return "Fuera de horario"
-        if minutos <= 10: return "menos de 10 minutos"
-        elif minutos <= 20: return "de 11 a 20 minutos"
-        elif minutos <= 30: return "de 21 a 30 minutos"
-        elif minutos <= 60: return "de 30 a 60 minutos"
-        else: return "mas de 60 minutos"
+    # === CALCULOS ===
+    df["Minutos de respuesta"] = df.apply(calcular_minutos, axis=1)
+    df["Intervalo"] = df["Minutos de respuesta"].apply(clasificar_intervalo)
+    df["DETALLES"] = df["DETALLES"].apply(limpiar_detalles)
 
-    df_resumen["Intervalo"] = df_resumen["diff_min"].apply(clasificar_tiempo)
-
-    tabla = pd.pivot_table(
-        df_resumen,
-        index=df_resumen["FECHA"].dt.date,
+    # === RESUMEN POR DÍA + INTERVALO ===
+    df["Fecha"] = df["CreatedOn"].dt.strftime("%d/%m/%Y")
+    pivot = pd.pivot_table(
+        df,
+        index="Fecha",
         columns="Intervalo",
         values="MSISDN",
         aggfunc="count",
-        fill_value=0,
-        margins=True,
-        margins_name="Total"
-    ).reset_index()
+        fill_value=0
+    )
+    # Orden de columnas fijo
+    orden_intervalos = [
+        "menos de 10 minutos", "de 11 a 20 minutos",
+        "de 21 a 30 minutos", "de 30 a 60 minutos",
+        "más de 60 minutos", "Horario bot inactivo"
+    ]
+    pivot = pivot.reindex(columns=orden_intervalos, fill_value=0)
+    pivot["Total"] = pivot.sum(axis=1)
 
-    for r in dataframe_to_rows(tabla, index=False, header=True):
-        resumen.append(r)
+    # === RESUMEN POR DETALLES ===
+    resumen_detalles = df["DETALLES"].value_counts().reset_index()
+    resumen_detalles.columns = ["DETALLES", "Cantidad"]
 
-    # Gráfica de barras
+    # === EXPORTAR CSV ===
+    df.to_csv(output_csv, index=False, encoding="utf-8-sig")
+
+    # === EXPORTAR EXCEL ===
+    with pd.ExcelWriter(output_excel, engine="openpyxl",
+                        date_format="DD/MM/YYYY HH:MM:SS",
+                        datetime_format="DD/MM/YYYY HH:MM:SS") as writer:
+        df.to_excel(writer, sheet_name="Logs", index=False)
+        pivot.to_excel(writer, sheet_name="Resumen", startrow=0, index=True)
+        resumen_detalles.to_excel(writer, sheet_name="Resumen", startrow=pivot.shape[0] + 4, index=False)
+
+    # === ESTILOS Y GRAFICAS ===
+    wb = load_workbook(output_excel)
+
+    # Hoja Logs → encabezados
+    ws_logs = wb["Logs"]
+    for cell in ws_logs[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+
+    # Hoja Resumen → encabezados
+    ws_resumen = wb["Resumen"]
+    for cell in ws_resumen[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+
+    # Gráfica de barras para intervalos diarios
+    max_row = pivot.shape[0] + 1
+    max_col = pivot.shape[1] + 1
     chart = BarChart()
-    chart.title = "Distribución de tiempos por día"
-    data = Reference(resumen, min_col=2, max_col=resumen.max_column, min_row=1, max_row=resumen.max_row)
-    cats = Reference(resumen, min_col=1, min_row=2, max_row=resumen.max_row-1)
+    data = Reference(ws_resumen, min_col=2, max_col=max_col, min_row=1, max_row=max_row)
+    cats = Reference(ws_resumen, min_col=1, min_row=2, max_row=max_row)
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(cats)
+    chart.title = "Distribución por Intervalos (diario)"
     chart.y_axis.title = "Cantidad"
-    resumen.add_chart(chart, "J2")
-
-    # Segundo bloque: resumen por DETALLES
-    conteo_detalles = df["DETALLES"].value_counts().reset_index()
-    conteo_detalles.columns = ["DETALLES", "Conteo"]
-
-    resumen.append([])
-    resumen.append(["Resumen por DETALLES"])
-    for r in dataframe_to_rows(conteo_detalles, index=False, header=True):
-        resumen.append(r)
+    chart.x_axis.title = "Fecha"
+    ws_resumen.add_chart(chart, f"I2")
 
     wb.save(output_excel)
-    print(f"\n✅ Archivo Excel generado en: {output_excel}")
-
-
-# ================= MAIN =================
-if __name__ == "__main__":
-    csv_file = consolidar_csv()
-    time.sleep(3)  # esperar 3 segundos
-    transformar_excel(csv_file)
+    print(f"✅ Archivos generados: {output_csv} y {output_excel}")
