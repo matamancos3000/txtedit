@@ -2,6 +2,7 @@ import os
 import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+import locale
 
 # === CONFIGURACIÓN ===
 base_paths = {
@@ -10,7 +11,11 @@ base_paths = {
     "PROD": r"..\PROD\Output\Log"
 }
 
-# Cuántos meses atrás quieres incluir (ejemplo: 3 = mes actual y 2 anteriores)
+# Idioma de meses en español
+locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")  # Linux/Mac
+# locale.setlocale(locale.LC_TIME, "Spanish_Spain")  # Windows (descomentar si usas Windows)
+
+# Número de meses a incluir (ejemplo: 3 = mes actual y 2 anteriores)
 num_meses = 3
 
 # Carpeta de salida
@@ -28,7 +33,7 @@ headers = [
 df_final = pd.DataFrame(columns=headers)
 now = datetime.now()
 
-# Lista de meses a procesar
+# Lista de meses a procesar en español y mayúsculas
 meses_a_incluir = []
 for i in range(num_meses):
     fecha_mes = now - relativedelta(months=i)
@@ -63,6 +68,6 @@ for entorno, base_path in base_paths.items():
 meses_texto = "-".join([m for _, m in meses_a_incluir[::-1]])  # Ej: JULIO-AGOSTO-SEPTIEMBRE
 output_file = os.path.join(output_dir, f"log-consentrado-{meses_texto}.csv")
 
-# Guardar CSV final
+# Guardar CSV final (sobrescribe si ya existe)
 df_final.to_csv(output_file, index=False, encoding="utf-8-sig")
 print(f"\n✅ Archivo concentrado generado en: {output_file}")
