@@ -1,22 +1,25 @@
 @echo off
-echo ============================
-echo  LIMPIEZA DE WINDOWS 10
-echo ============================
+title 🧹 Limpieza básica de Windows
+color 0A
+
+echo ==============================
+echo    LIMPIEZA BÁSICA WINDOWS
+echo ==============================
 echo.
 
-echo Vaciando papelera de reciclaje...
-PowerShell.exe -NoProfile -Command "Clear-RecycleBin -Force"
+:: Borrar archivos temporales del usuario
+echo 🗑️  Eliminando archivos temporales...
+del /s /f /q "%temp%\*.*" >nul 2>&1
+for /d %%x in ("%temp%\*") do rd /s /q "%%x"
 
-echo Limpiando cache de usuario...
-del /s /q %temp%\* >nul 2>&1
-rd /s /q %temp% >nul 2>&1
-md %temp%
+:: Borrar caché de miniaturas del usuario
+echo 🖼️  Borrando cache de miniaturas...
+del /s /f /q "%LocalAppData%\Microsoft\Windows\Explorer\thumbcache_*.db" >nul 2>&1
 
-echo Limpiando cache de Windows...
-del /s /q C:\Windows\Temp\* >nul 2>&1
-rd /s /q C:\Windows\Temp >nul 2>&1
-md C:\Windows\Temp
+:: Vaciar Papelera de reciclaje del usuario
+echo 🧺 Vaciando papelera de reciclaje...
+PowerShell.exe -NoLogo -Command Clear-RecycleBin -Force
 
 echo.
-echo ✅ Limpieza completada
+echo ✅ Limpieza completada.
 pause
