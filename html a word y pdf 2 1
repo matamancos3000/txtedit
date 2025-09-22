@@ -1,0 +1,84 @@
+import os
+import win32com.client as win32
+
+def convertir_html_a_word_pdf(carpeta_raiz):
+    # Definir carpetas de salida
+    carpeta_base = os.path.dirname(carpeta_raiz)
+    nombre_raiz = os.path.basename(carpeta_raiz)
+    
+    carpeta_word = os.path.join(carpeta_base, f"{nombre_raiz}_word")
+    carpeta_pdf = os.path.join(carpeta_base, f"{nombre_raiz}_pdf")
+    
+    # Crear carpetas de salida si no existen
+    os.makedirs(carpeta_word, exist_ok=True)
+    os.makedirs(carpeta_pdf, exist_ok=True)
+    
+    # Iniciar Word (visible para confirmaciones)
+    word = win32.Dispatch('Word.Application')
+    word.Visible = True  # Mostrar ventana de Word
+    
+    # Contador de archivos procesados
+    archivos_procesados = 0
+    
+    # Recorrer recursivamente la carpeta raíz
+    for carpeta_actual, subcarpetas, archivos in os.walk(carpeta_raiz):
+        # Excluir carpetas que terminen en "_archivos"
+        subcarpetas[:] = [sub for sub in subcarpetas if not sub.endswith('_archivos')]
+        
+        # Procesar archivos HTML/HTM
+        for archivo in archivos:
+            if archivo.lower().endswith((".htm", ".html")):
+                # Ruta completa del archivo HTML original
+                ruta_html = os.path.join(carpeta_actual, archivo)
+                
+                # Crear rutas relativas para mantener estructura de carpetas
+                ruta_relativa = os.path.relpath(carpeta_actual, carpeta_raiz)
+                nombre_base = os.path.splitext(archivo)[0]
+                
+                # Crear carpetas de destino si no existen
+                carpeta_word_destino = os.path.join(carpeta_word, ruta_relativa)
+                carpeta_pdf_destino = os.path.join(carpeta_pdf, ruta_relativa)
+                os.makedirs(carpeta_word_destino, exist_ok=True)
+                os.makedirs(carpeta_pdf_destino, exist_ok=True)
+                
+                # Rutas completas de destino
+                ruta_docx = os.path.join(carpeta_word_destino, f"{nombre_base}.docx")
+                ruta_pdf = os.path.join(carpeta_pdf_destino, f"{nombre_base}.pdf")
+                
+                print(f"Procesando: {ruta_html}")
+                
+                try:
+                    # Abrir HTML en Word
+                    doc = word.Documents.Open(ruta_html)
+                    
+                    # Guardar como DOCX
+                    doc.SaveAs(ruta_docx, FileFormat=16)  # 16 = wdFormatDocumentDefault
+                    print(f"  ✓ Guardado como DOCX: {ruta_docx}")
+                    
+                    # Guardar como PDF
+                    doc.SaveAs(ruta_pdf, FileFormat=17)  # 17 = wdFormatPDF
+                    print(f"  ✓ Guardado como PDF: {ruta_pdf}")
+                    
+                    # Cerrar documento
+                    doc.Close()
+                    
+                    archivos_procesados += 1
+                    
+                except Exception as e:
+                    print(f"  ✗ Error procesando {archivo}: {str(e)}")
+    
+    # Cerrar Word
+    word.Quit()
+    
+    print(f"\n✅ Conversión completada!")
+    print(f"📁 Archivos procesados: {archivos_procesados}")
+    print(f"📂 Carpeta Word: {carpeta_word}")
+    print(f"📂 Carpeta PDF: {carpeta_pdf}")
+
+# USO DEL SCRIPT
+if __name__ == "__main__":
+    # Configurar la carpeta raíz (modifica esta ruta)
+    carpeta_raiz = r"C:\Users\Erick Baez\Documents\calidad2025"
+    
+    # Ejecutar conversión
+    convertir_html_a_word_pdf(carpeta_raiz)
