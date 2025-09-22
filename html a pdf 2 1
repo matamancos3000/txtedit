@@ -2,115 +2,115 @@ import os
 import re
 import csv
 from pathlib import Path
+from bs4 import BeautifulSoup
 
-# 🔹 Configuración
-CARPETA_RAIZ = Path("../calidad2025")   # Carpeta raíz que contiene todos los instructivos
+# -------------------------
+# CONFIGURACIÓN
+# -------------------------
+CARPETA_RAIZ = Path(r"../calidad2025/")   # Carpeta raíz de instructivos
 URL_SHAREPOINT = "https://teams.global.hsbc/sites/labpspyas-2019/CALIDAD20251"
-CARPETA_RECURSOS = "Formatos2021"
-
-# 🔹 Logs
 LOG_CSV = CARPETA_RAIZ / "../log_cambios.csv"
-LOG_PRINT = CARPETA_RAIZ / "../log_prints.txt"
+LOG_PRINTS = CARPETA_RAIZ / "../log_prints.txt"
 
-# Extensiones de office/pdf que se quieren modificar SOLO si contienen "calidad2021/formato2021"
-EXT_RECURSOS = (".docx", ".pdf", ".xlsx", ".pptx", ".doc", ".xls", ".xlsm")
+# Extensiones de office/pdf a considerar
+EXTS_OFFICE = (".docx", ".pdf", ".xlsx", ".pptx", ".doc", ".xls", ".xlsm")
 
-
-# -------------------------------
-# Utilidad: escribir en log_print además de consola
-def log_print(msg: str):
+# -------------------------
+# LOGGING
+# -------------------------
+def log_print(msg):
+    """Imprime en consola y guarda en log_prints.txt"""
     print(msg)
-    with open(LOG_PRINT, "a", encoding="utf-8") as logf:
-        logf.write(msg + "\n")
+    with open(LOG_PRINTS, "a", encoding="utf-8") as f:
+        f.write(str(msg) + "\n")
 
-
-# -------------------------------
-# Registrar cambios en log CSV
 def registrar_cambio(archivo_html, tipo, enlace_original, enlace_nuevo):
+    """Guarda un registro en el log CSV"""
+    with open(LOG_CSV, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([archivo_html, tipo, enlace_original, enlace_nuevo])
+
+# -------------------------
+# FUNCIONES PRINCIPALES
+# -------------------------
+def convertir_enlaces(html_path):
+    """Procesa un archivo HTML y reemplaza enlaces según reglas"""
     try:
-        with open(LOG_CSV, "a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([archivo_html, tipo, enlace_original, enlace_nuevo])
-    except Exception as e:
-        log_print(f"[ERROR] No se pudo registrar cambio en {archivo_html}: {e}")
+        with open(html_path, "r", encoding="utf-8") as f:
+            soup = BeautifulSoup(f, "html.parser")
 
+        enlaces = soup.find_all("a", href=True)
+        cambios = 0
 
-# -------------------------------
-# Conversión de enlaces dentro de un archivo
-def convertir_enlaces(contenido: str, archivo_html: Path) -> str:
-    def reemplazo(match):
-        enlace = match.group(1)
-        nuevo_enlace = enlace  # por defecto no cambia
+        for enlace in enlaces:
+            href = enlace["href"]
+            original = href
 
-        # 🔹 Caso 1: Enlaces a otros instructivos .htm / .html
-        if enlace.lower().endswith((".htm", ".html")):
-            ruta_relativa = os.path.splitext(enlace)[0] + ".pdf"
-            nuevo_enlace = f"{URL_SHAREPOINT}/{archivo_html.parent.relative_to(CARPETA_RAIZ)}/{Path(ruta_relativa).name}"
-            registrar_cambio(archivo_html, "htm->pdf", enlace, nuevo_enlace)
-            log_print(f"[HTM->PDF] {archivo_html} : {enlace} -> {nuevo_enlace}")
+            # --- 1) Reemplazo de .htm/.html por .pdf en SharePoint ---
+            if href.lower().endswith((".htm", ".html")):
+                ruta_relativa = os.path.relpath(html_path, CARPETA_RAIZ).replace("\\", "/")
+                carpeta_rel = os.path.dirname(ruta_relativa)
+                base = os.path.splitext(os.path.basename(href))[0]
+                nuevo = f"{URL_SHAREPOINT}/{carpeta_rel}/{base}.pdf"
+                enlace["href"] = nuevo
+                registrar_cambio(str(html_path), "HTM->PDF", original, nuevo)
+                cambios += 1
 
-        # 🔹 Caso 2: Archivos de recursos (solo si contienen calidad2021/formato2021)
-        elif enlace.lower().endswith(EXT_RECURSOS) and "calidad2021" in enlace.lower():
-            # quitar desde "calidad2021/formato2021"
-            partes = re.split(r"calidad2021[/\\]formato2021[/\\]", enlace, flags=re.IGNORECASE)
-            if len(partes) > 1:
-                ruta_relativa = partes[1]
-                nuevo_enlace = f"{URL_SHAREPOINT}/{CARPETA_RECURSOS}/{ruta_relativa}"
-                registrar_cambio(archivo_html, "recurso", enlace, nuevo_enlace)
-                log_print(f"[RECURSO] {archivo_html} : {enlace} -> {nuevo_enlace}")
+            # --- 2) Archivos Office/PDF que contengan calidad2021/formato2021 ---
+            elif any(href.lower().endswith(ext) for ext in EXTS_OFFICE):
+                if "calidad2021" in href.lower():
+                    nuevo = re.sub(
+                        r".*calidad2021[/\\]formato2021[/\\]?",
+                        f"{URL_SHAREPOINT}/Formatos2021/",
+                        href,
+                        flags=re.IGNORECASE,
+                    )
+                    enlace["href"] = nuevo
+                    registrar_cambio(str(html_path), "RECURSO", original, nuevo)
+                    cambios += 1
 
-        return match.group(0).replace(enlace, nuevo_enlace)
+        if cambios > 0:
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(str(soup))
 
-    patron = r'href="([^"]+)"'
-    return re.sub(patron, reemplazo, contenido, flags=re.IGNORECASE)
-
-
-# -------------------------------
-# Procesar archivo HTML individual
-def procesar_html(archivo_html: Path, procesados: set):
-    if archivo_html in procesados:
-        log_print(f"[SKIP] Ya procesado {archivo_html}")
-        return
-
-    # Ignorar carpetas *_archivos
-    if archivo_html.stem.endswith("_archivos"):
-        log_print(f"[IGNORADO] Carpeta de recursos {archivo_html}")
-        return
-
-    try:
-        with open(archivo_html, "r", encoding="utf-8", errors="ignore") as f:
-            contenido = f.read()
-
-        nuevo_contenido = convertir_enlaces(contenido, archivo_html)
-
-        with open(archivo_html, "w", encoding="utf-8", errors="ignore") as f:
-            f.write(nuevo_contenido)
-
-        log_print(f"[OK] Procesado {archivo_html}")
-        procesados.add(archivo_html)
+        log_print(f"{html_path} -> {cambios} enlaces modificados")
 
     except Exception as e:
-        log_print(f"[ERROR] Procesando {archivo_html}: {e}")
+        log_print(f"ERROR procesando {html_path}: {e}")
 
-
-# -------------------------------
-# Recorrer todas las carpetas y procesar .htm/.html
-def recorrer_y_procesar():
+def procesar_carpeta(carpeta_raiz):
+    """Busca y procesa todos los .htm en la carpeta y subcarpetas"""
     procesados = set()
 
+    for html_path in carpeta_raiz.rglob("*.htm"):
+        if "_archivos" in str(html_path.parent):  
+            # --- 1) No procesar carpetas *_archivos ---
+            continue
+        if html_path in procesados:
+            continue
+        convertir_enlaces(html_path)
+        procesados.add(html_path)
+
+    for html_path in carpeta_raiz.rglob("*.html"):
+        if "_archivos" in str(html_path.parent):
+            continue
+        if html_path in procesados:
+            continue
+        convertir_enlaces(html_path)
+        procesados.add(html_path)
+
+# -------------------------
+# MAIN
+# -------------------------
+if __name__ == "__main__":
     # Inicializar logs
     with open(LOG_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["archivo_html", "tipo_archivo", "enlace_original", "enlace_nuevo"])
-    with open(LOG_PRINT, "w", encoding="utf-8") as f:
-        f.write("LOG DE EJECUCIÓN\n\n")
 
-    for archivo in CARPETA_RAIZ.rglob("*.htm*"):
-        # Ignorar carpetas *_archivos
-        if archivo.is_file() and not archivo.stem.endswith("_archivos"):
-            procesar_html(archivo, procesados)
+    with open(LOG_PRINTS, "w", encoding="utf-8") as f:
+        f.write("=== LOG DE EJECUCIÓN ===\n")
 
-
-# -------------------------------
-if __name__ == "__main__":
-    recorrer_y_procesar()
+    log_print(f"Procesando instructivos en {CARPETA_RAIZ}")
+    procesar_carpeta(CARPETA_RAIZ)
+    log_print("Proceso terminado ✅")
