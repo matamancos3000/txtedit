@@ -4,101 +4,101 @@ import csv
 from pathlib import Path
 from bs4 import BeautifulSoup
 
-# ==============================
-# CONFIGURACIÓN
-# ==============================
-CARPETA_RAIZ = Path(r"../calidad2025")  # Carpeta raíz con TODOS los instructivos
-URL_SHAREPOINT_BASE = "https://teams.global.hsbc/sites/labpspyas-2019/CALIDAD20251"
-LOG_CSV = CARPETA_RAIZ / "../log_cambios.csv"
+# 📌 Configuración principal
+CARPETA_RAIZ = Path(r"../calidad2025")
+URL_SHAREPOINT = "https://teams.global.hsbc/sites/labpspyas-2019/CALIDAD20251"
 
-# Extensiones de office/pdf
-EXT_RECURSOS = (".docx", ".pdf", ".xlsx", ".pptx", ".doc", ".xls", ".xlsm")
+# Archivos de recursos que se deben revisar SOLO si contienen 'calidad2021/formato2021'
+EXT_RECURSOS = [".docx", ".pdf", ".xlsx", ".pptx", ".doc", ".xls", ".xlsm"]
 
-# ==============================
-# FUNCIONES
-# ==============================
+# Archivo de log (se guarda un nivel arriba de la carpeta raíz)
+LOG_CSV = CARPETA_RAIZ.parent / "log_cambios.csv"
 
-def registrar_cambio(log_writer, archivo_html, tipo, original, nuevo):
-    """Registra los cambios de enlaces en el log."""
+# Para evitar procesar dos veces el mismo archivo en la misma ejecución
+procesados = set()
+
+
+def registrar_cambio(nombre_html, tipo, original, nuevo):
+    """Guarda un cambio en el CSV de log."""
+    with open(LOG_CSV, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([nombre_html, tipo, original, nuevo])
+
+
+def convertir_enlaces(html_path):
+    """Procesa un archivo HTML y actualiza sus enlaces según reglas."""
     try:
-        log_writer.writerow([archivo_html, tipo, original, nuevo])
+        # Evitar reprocesar el mismo archivo
+        if html_path in procesados:
+            return
+        procesados.add(html_path)
+
+        with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
+            soup = BeautifulSoup(f, "html.parser")
+
+        cambios = False
+
+        for tag in soup.find_all(href=True):
+            href = tag["href"]
+            original_href = href
+
+            # Regla 1: cambiar .htm/.html a .pdf respetando subcarpetas
+            if href.lower().endswith((".htm", ".html")):
+                # Obtener ruta relativa desde la carpeta raíz
+                rel_path = os.path.relpath((html_path.parent / href).resolve(), CARPETA_RAIZ.resolve())
+                rel_path = rel_path.replace("\\", "/")  # Normalizar separadores
+
+                nuevo_href = f"{URL_SHAREPOINT}/{rel_path}"
+                nuevo_href = re.sub(r"\.html?$", ".pdf", nuevo_href, flags=re.IGNORECASE)
+
+                if nuevo_href != href:
+                    tag["href"] = nuevo_href
+                    registrar_cambio(html_path, "HTM->PDF", original_href, nuevo_href)
+                    cambios = True
+
+            # Regla 2: recursos (.docx, .pdf, .xlsx, etc.) SOLO si contienen 'calidad2021/formato2021'
+            elif any(href.lower().endswith(ext) for ext in EXT_RECURSOS):
+                if "calidad2021/formato2021/" in href.lower():
+                    nombre_archivo = os.path.basename(href)
+                    # Mantener subcarpetas después de "formato2021"
+                    subpath = href.lower().split("calidad2021/formato2021/")[-1]
+                    nuevo_href = f"{URL_SHAREPOINT}/Formatos2021/{subpath}"
+
+                    tag["href"] = nuevo_href
+                    registrar_cambio(html_path, "RECURSO", original_href, nuevo_href)
+                    cambios = True
+
+        # Guardar solo si hubo cambios
+        if cambios:
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(str(soup))
+
     except Exception as e:
-        print(f"[WARN] No se pudo registrar un cambio en {archivo_html}: {e}")
-
-def convertir_enlaces(html_path, log_writer):
-    """
-    Convierte los enlaces dentro de un archivo .htm/.html
-    según las reglas de SharePoint.
-    """
-    with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
-        soup = BeautifulSoup(f, "html.parser")
-
-    cambios = False
-
-    for link in soup.find_all(href=True):
-        original = link["href"]
-
-        # --- Regla 1: enlaces internos a instructivos .htm → SharePoint .pdf
-        if original.lower().endswith((".htm", ".html")):
-            if not original.startswith("http"):  # solo links relativos
-                # Construir la ruta relativa desde la raíz
-                relativo = (html_path.parent / original).resolve().relative_to(CARPETA_RAIZ.resolve())
-                nuevo = f"{URL_SHAREPOINT_BASE}/{relativo.as_posix()}"
-                nuevo = re.sub(r"\.htm[l]?$", ".pdf", nuevo, flags=re.IGNORECASE)
-
-                link["href"] = nuevo
-                registrar_cambio(log_writer, html_path, "HTML->PDF", original, nuevo)
-                cambios = True
-
-        # --- Regla 2: enlaces a recursos de Formatos2021 desde 'calidad2021/formato2021/'
-        elif "calidad2021/formato2021/" in original.lower():
-            # Extraer la parte después de 'formato2021/'
-            match = re.search(r"calidad2021/formato2021/(.*)", original, re.IGNORECASE)
-            if match:
-                relativo = match.group(1)
-                nuevo = f"{URL_SHAREPOINT_BASE}/Formatos2021/{relativo}"
-                link["href"] = nuevo
-                registrar_cambio(log_writer, html_path, "RECURSO", original, nuevo)
-                cambios = True
-
-    # Guardar cambios solo si hubo modificaciones
-    if cambios:
-        with open(html_path, "w", encoding="utf-8", errors="ignore") as f:
-            f.write(str(soup))
+        print(f"⚠️ Error procesando {html_path}: {e}")
 
 
-def procesar_carpeta(carpeta_raiz):
-    """
-    Recorre toda la carpeta raíz y procesa todos los archivos .htm/.html,
-    respetando las carpetas *_archivos (no se tocan).
-    """
-    procesados = set()
+def recorrer_carpeta(carpeta):
+    """Recorre la carpeta y procesa todos los archivos HTML, ignorando *_archivos."""
+    for root, dirs, files in os.walk(carpeta):
+        # Excluir carpetas *_archivos
+        dirs[:] = [d for d in dirs if not d.lower().endswith("_archivos")]
 
-    with open(LOG_CSV, "w", newline="", encoding="utf-8") as log_file:
-        log_writer = csv.writer(log_file)
-        log_writer.writerow(["Archivo HTML", "Tipo", "Enlace original", "Enlace nuevo"])  # sin fecha
-
-        for html_path in carpeta_raiz.rglob("*.[hH][tT][mM]*"):
-            # Saltar carpetas de recursos *_archivos
-            if any("_archivos" in part for part in html_path.parts):
-                continue
-
-            # Evitar procesar el mismo archivo dos veces
-            if html_path in procesados:
-                continue
-
-            try:
-                convertir_enlaces(html_path, log_writer)
-                procesados.add(html_path)
-                print(f"[OK] Procesado: {html_path}")
-            except Exception as e:
-                print(f"[ERROR] No se pudo procesar {html_path}: {e}")
-                continue
+        for file in files:
+            if file.lower().endswith((".htm", ".html")):
+                file_path = Path(root) / file
+                convertir_enlaces(file_path)
 
 
-# ==============================
-# EJECUCIÓN
-# ==============================
+def main():
+    # Crear log con encabezados si no existe
+    if not LOG_CSV.exists():
+        with open(LOG_CSV, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Archivo HTML", "Tipo", "Enlace original", "Enlace nuevo"])
+
+    recorrer_carpeta(CARPETA_RAIZ)
+    print("✅ Proceso terminado. Revisar log en:", LOG_CSV)
+
+
 if __name__ == "__main__":
-    procesar_carpeta(CARPETA_RAIZ)
-    print("✅ Proceso completado. Revisa el log:", LOG_CSV)
+    main()
