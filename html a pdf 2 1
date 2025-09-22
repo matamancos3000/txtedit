@@ -1,116 +1,134 @@
-import os
 import re
-import csv
 from pathlib import Path
-from bs4 import BeautifulSoup
+import shutil
+import os
+import csv
 
-# -------------------------
-# CONFIGURACIÓN
-# -------------------------
-CARPETA_RAIZ = Path(r"../calidad2025/")   # Carpeta raíz de instructivos
-URL_SHAREPOINT = "https://teams.global.hsbc/sites/labpspyas-2019/CALIDAD20251"
-LOG_CSV = CARPETA_RAIZ / "../log_cambios.csv"
-LOG_PRINTS = CARPETA_RAIZ / "../log_prints.txt"
+# ================== CONFIGURACIÓN ==================
+# Carpeta raíz que contiene todos los instructivos
+CARPETA_RAIZ = Path(r"C:\Users\45056372\Desktop\prueba its\calidad2025")
 
-# Extensiones de office/pdf a considerar
-EXTS_OFFICE = (".docx", ".pdf", ".xlsx", ".pptx", ".doc", ".xls", ".xlsm")
+# Carpeta de recursos
+CARPETA_DE_RECURSOS = "Formatos2021"
 
-# -------------------------
-# LOGGING
-# -------------------------
-def log_print(msg):
-    """Imprime en consola y guarda en log_prints.txt"""
-    print(msg)
-    with open(LOG_PRINTS, "a", encoding="utf-8") as f:
-        f.write(str(msg) + "\n")
+# URL base de SharePoint
+URL_SHAREPOINT = "https://teams.global.hsbc/sites/labpspyas-2019/CALIDAD20251/"
 
-def registrar_cambio(archivo_html, tipo, enlace_original, enlace_nuevo):
-    """Guarda un registro en el log CSV"""
-    with open(LOG_CSV, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow([archivo_html, tipo, enlace_original, enlace_nuevo])
+# Carpeta de salida (se sobrescriben los .htm)
+CARPETA_SALIDA = CARPETA_RAIZ
 
-# -------------------------
-# FUNCIONES PRINCIPALES
-# -------------------------
-def convertir_enlaces(html_path):
-    """Procesa un archivo HTML y reemplaza enlaces según reglas"""
+# Log de cambios
+LOG_CSV = CARPETA_RAIZ.parent / "log_cambios.csv"
+
+
+# ================== FUNCIONES ==================
+def convertir_enlaces(contenido):
+    """
+    Convierte enlaces dentro de un HTML:
+    - .htm/.html → .pdf en SharePoint respetando ruta relativa
+    - Documentos con href que contenga 'calidad2021/formato2021/' → SharePoint
+    """
+    cambios = []
+
+    def reemplazar_enlace(match):
+        comilla = match.group(1)
+        href = match.group(2)
+        nombre_base, extension = os.path.splitext(os.path.basename(href))
+        extension = extension.lower()
+
+        # Caso 1: enlaces a HTML → convertir a PDF
+        if extension in [".htm", ".html"]:
+            nuevo_href = Path(href).with_suffix(".pdf")
+            nuevo = f"{URL_SHAREPOINT}{nuevo_href.as_posix()}"
+            cambios.append((href, nuevo, "HTML->PDF"))
+            return f'href={comilla}{nuevo}{comilla}'
+
+        # Caso 2: documentos de office/pdf → solo si contienen 'calidad2021/formato2021/'
+        elif extension in [".docx", ".pdf", ".xlsx", ".pptx", ".doc", ".xls", ".xlsm"]:
+            href_norm = href.replace("\\", "/")
+            if "calidad2021/formato2021/" in href_norm.lower():
+                # Tomamos la parte después de 'formato2021/' y agregamos al URL_SHAREPOINT
+                partes = href_norm.lower().split("formato2021/", 1)
+                nuevo = f"{URL_SHAREPOINT}Formatos2021/{partes[1]}"
+                cambios.append((href, nuevo, extension.upper().strip(".")))
+                return f'href={comilla}{nuevo}{comilla}'
+            else:
+                return match.group(0)
+
+        else:
+            return match.group(0)
+
+    patron = r'href=(["\'])([^"\']+\.(?:htm[l]?|docx|pdf|xlsx|pptx|doc|xls|xlsm))\1'
+    nuevo_contenido = re.sub(patron, reemplazar_enlace, contenido, flags=re.IGNORECASE)
+    return nuevo_contenido, cambios
+
+
+def procesar_html(html_path):
+    """Lee un HTML y convierte enlaces."""
+    encoding = 'utf-8'
     try:
-        with open(html_path, "r", encoding="utf-8") as f:
-            soup = BeautifulSoup(f, "html.parser")
+        with open(html_path, 'r', encoding=encoding) as f:
+            contenido = f.read()
+    except UnicodeDecodeError:
+        encoding = 'latin-1'
+        with open(html_path, 'r', encoding=encoding) as f:
+            contenido = f.read()
 
-        enlaces = soup.find_all("a", href=True)
-        cambios = 0
+    contenido_mod, cambios = convertir_enlaces(contenido)
+    return contenido_mod, encoding, cambios
 
-        for enlace in enlaces:
-            href = enlace["href"]
-            original = href
 
-            # --- 1) Reemplazo de .htm/.html por .pdf en SharePoint ---
-            if href.lower().endswith((".htm", ".html")):
-                ruta_relativa = os.path.relpath(html_path, CARPETA_RAIZ).replace("\\", "/")
-                carpeta_rel = os.path.dirname(ruta_relativa)
-                base = os.path.splitext(os.path.basename(href))[0]
-                nuevo = f"{URL_SHAREPOINT}/{carpeta_rel}/{base}.pdf"
-                enlace["href"] = nuevo
-                registrar_cambio(str(html_path), "HTM->PDF", original, nuevo)
-                cambios += 1
+def copiar_estructura(html_path):
+    """
+    No modifica nada dentro de la carpeta _archivos.
+    Solo asegura que exista.
+    """
+    html_name = html_path.stem
+    carpeta_archivos = html_path.parent / f"{html_name}_archivos"
+    if carpeta_archivos.exists():
+        # Se deja intacta
+        pass
 
-            # --- 2) Archivos Office/PDF que contengan calidad2021/formato2021 ---
-            elif any(href.lower().endswith(ext) for ext in EXTS_OFFICE):
-                if "calidad2021" in href.lower():
-                    nuevo = re.sub(
-                        r".*calidad2021[/\\]formato2021[/\\]?",
-                        f"{URL_SHAREPOINT}/Formatos2021/",
-                        href,
-                        flags=re.IGNORECASE,
-                    )
-                    enlace["href"] = nuevo
-                    registrar_cambio(str(html_path), "RECURSO", original, nuevo)
-                    cambios += 1
 
-        if cambios > 0:
-            with open(html_path, "w", encoding="utf-8") as f:
-                f.write(str(soup))
+def registrar_cambios(archivo_html, cambios):
+    """Registra los cambios en CSV sin fecha."""
+    existe = LOG_CSV.exists()
+    with open(LOG_CSV, 'a', newline='', encoding='utf-8') as csvfile:
+        writer = csv.writer(csvfile)
+        if not existe:
+            writer.writerow(["Archivo HTML", "Tipo", "Enlace original", "Enlace nuevo"])
 
-        log_print(f"{html_path} -> {cambios} enlaces modificados")
+        for original, nuevo, tipo in cambios:
+            writer.writerow([archivo_html, tipo, original, nuevo])
 
-    except Exception as e:
-        log_print(f"ERROR procesando {html_path}: {e}")
 
-def procesar_carpeta(carpeta_raiz):
-    """Busca y procesa todos los .htm en la carpeta y subcarpetas"""
-    procesados = set()
+# ================== PROCESO PRINCIPAL ==================
+print("Iniciando conversión en carpeta raíz:", CARPETA_RAIZ)
 
-    for html_path in carpeta_raiz.rglob("*.htm"):
-        if "_archivos" in str(html_path.parent):  
-            # --- 1) No procesar carpetas *_archivos ---
-            continue
-        if html_path in procesados:
-            continue
-        convertir_enlaces(html_path)
-        procesados.add(html_path)
+procesados = set()  # Para evitar procesar dos veces el mismo archivo
 
-    for html_path in carpeta_raiz.rglob("*.html"):
-        if "_archivos" in str(html_path.parent):
-            continue
-        if html_path in procesados:
-            continue
-        convertir_enlaces(html_path)
-        procesados.add(html_path)
+for html_file in CARPETA_RAIZ.rglob("*.[hH][tT][mM]*"):
+    if html_file.is_file() and '_archivos' not in str(html_file.parent) and html_file not in procesados:
+        print(f"\n● Procesando: {html_file.relative_to(CARPETA_RAIZ)}")
+        procesados.add(html_file)
+        cambios = []
+        try:
+            contenido_mod, encoding, cambios = procesar_html(html_file)
+            html_file.write_text(contenido_mod, encoding=encoding)
+            copiar_estructura(html_file)
 
-# -------------------------
-# MAIN
-# -------------------------
-if __name__ == "__main__":
-    # Inicializar logs
-    with open(LOG_CSV, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["archivo_html", "tipo_archivo", "enlace_original", "enlace_nuevo"])
+            if cambios:
+                registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
+                print(f"   ✅ {len(cambios)} enlace(s) modificado(s)")
+            else:
+                print("   ⚠️ No se encontraron enlaces relevantes")
 
-    with open(LOG_PRINTS, "w", encoding="utf-8") as f:
-        f.write("=== LOG DE EJECUCIÓN ===\n")
+        except Exception as e:
+            print(f"   ❌ Error en {html_file.name}: {str(e)}")
+            # Registrar cambios si hubo antes del error
+            if cambios:
+                registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
+                print(f"   ⚠️ {len(cambios)} enlace(s) registrados pese al error")
 
-    log_print(f"Procesando instructivos en {CARPETA_RAIZ}")
-    procesar_carpeta(CARPETA_RAIZ)
-    log_print("Proceso terminado ✅")
+print("\n✔ Proceso completado.")
+print("📑 Log de cambios en:", LOG_CSV)
