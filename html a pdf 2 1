@@ -122,12 +122,31 @@ def registrar_cambios(archivo_html, cambios):
             writer.writerow([archivo_html, tipo, original, nuevo])
 
 
-def deberia_ignorar_carpeta(ruta):
-    """Verifica si la ruta debe ser ignorada por estar en carpeta *_archivos"""
-    for parte in ruta.parts:
-        if "_archivos" in parte and ruta.is_relative_to(CARPETA_RAIZ):
-            return True
-    return False
+def listar_html_sin_archivos(carpeta_raiz):
+    """
+    Recursivamente lista todos los archivos HTML/HTM, pero ignora completamente
+    cualquier carpeta que tenga '_archivos' en su nombre.
+    """
+    html_files = []
+    
+    def recorrer_carpeta(carpeta):
+        # Verificar si esta carpeta debe ser ignorada
+        if "_archivos" in carpeta.name:
+            print(f"⏭️  Ignorando completamente carpeta: {carpeta.relative_to(carpeta_raiz)}")
+            return
+        
+        # Recorrer elementos de la carpeta actual
+        for item in carpeta.iterdir():
+            if item.is_file():
+                # Verificar si es archivo HTML/HTM
+                if item.suffix.lower() in ['.htm', '.html']:
+                    html_files.append(item)
+            elif item.is_dir():
+                # Llamada recursiva para subcarpetas
+                recorrer_carpeta(item)
+    
+    recorrer_carpeta(carpeta_raiz)
+    return html_files
 
 
 # ================== PROCESO PRINCIPAL ==================
@@ -135,36 +154,35 @@ print("Iniciando conversión en carpeta raíz:", CARPETA_RAIZ)
 procesados = set()
 total_modificados = 0
 
-for html_file in CARPETA_RAIZ.rglob("*.[hH][tT][mM]*"):
-    if html_file.is_file():
-        # ✅ MODIFICACIÓN IMPORTANTE: Ignorar completamente carpetas *_archivos
-        if deberia_ignorar_carpeta(html_file):
-            print(f"⏭️  Ignorando carpeta _archivos: {html_file.relative_to(CARPETA_RAIZ)}")
-            continue
+# ✅ USAR NUESTRA PROPIA FUNCIÓN QUE IGNORA CARPETAS *_archivos
+html_files = listar_html_sin_archivos(CARPETA_RAIZ)
 
-        if html_file not in procesados:
-            print(f"\n● Procesando: {html_file.relative_to(CARPETA_RAIZ)}")
-            procesados.add(html_file)
+print(f"📁 Encontrados {len(html_files)} archivos HTML para procesar (ignorando carpetas _archivos)")
 
-            cambios = []
-            try:
-                contenido, encoding_original, cambios = procesar_html(html_file)
-                html_file.write_text(contenido, encoding=encoding_original)
-                copiar_estructura(html_file, html_file.parent)
+for html_file in html_files:
+    if html_file not in procesados:
+        print(f"\n● Procesando: {html_file.relative_to(CARPETA_RAIZ)}")
+        procesados.add(html_file)
 
-                if cambios:
-                    registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
-                    num = len(cambios)
-                    total_modificados += num
-                    print(f"   ✅ {num} enlace(s) modificado(s)")
-                else:
-                    print("   ⚠️ No se encontraron enlaces relevantes")
+        cambios = []
+        try:
+            contenido, encoding_original, cambios = procesar_html(html_file)
+            html_file.write_text(contenido, encoding=encoding_original)
+            copiar_estructura(html_file, html_file.parent)
 
-            except Exception as e:
-                print(f"   ❌ Error en {html_file.name}: {str(e)}")
-                if cambios:
-                    registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
-                    print(f"   ⚠️ {len(cambios)} enlace(s) registrados en log pese al error")
+            if cambios:
+                registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
+                num = len(cambios)
+                total_modificados += num
+                print(f"   ✅ {num} enlace(s) modificado(s)")
+            else:
+                print("   ⚠️ No se encontraron enlaces relevantes")
+
+        except Exception as e:
+            print(f"   ❌ Error en {html_file.name}: {str(e)}")
+            if cambios:
+                registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
+                print(f"   ⚠️ {len(cambios)} enlace(s) registrados en log pese al error")
 
 print("\n✔ Proceso completado.")
 print(f"📑 Log de cambios en: {LOG_CSV}")
