@@ -38,7 +38,6 @@ def convertir_enlaces(contenido, ruta_html):
 
         # ----- Caso: .htm/.html -----
         if extension in [".htm", ".html"]:
-            # 1) Si contiene "calidad2021/"
             m = re.search(r'calidad2021/', ruta_sin_fragmento, flags=re.IGNORECASE)
             if m:
                 suffix = ruta_sin_fragmento[m.end():]
@@ -47,14 +46,12 @@ def convertir_enlaces(contenido, ruta_html):
                 cambios.append((enlace, nuevo, "HTML->PDF"))
                 return f'href={comilla}{nuevo}{comilla}'
 
-            # 2) Si es absoluto (empieza con '/')
             if ruta_sin_fragmento.startswith("/"):
                 ruta_relativa = Path(ruta_sin_fragmento.lstrip("/")).with_suffix(".pdf").as_posix()
                 nuevo = f"{URL_SHAREPOINT}{ruta_relativa}"
                 cambios.append((enlace, nuevo, "HTML->PDF (raiz)"))
                 return f'href={comilla}{nuevo}{comilla}'
 
-            # 3) Si es relativo
             try:
                 posible = (ruta_html.parent / ruta_sin_fragmento).resolve()
                 try:
@@ -132,7 +129,7 @@ total_modificados = 0
 
 for html_file in CARPETA_RAIZ.rglob("*.[hH][tT][mM]*"):
     if html_file.is_file():
-        # ❌ no modificar los que estén dentro de carpetas *_archivos
+        # ❌ Saltar archivos dentro de cualquier carpeta *_archivos
         if any("_archivos" in part.lower() for part in html_file.parts):
             continue
 
