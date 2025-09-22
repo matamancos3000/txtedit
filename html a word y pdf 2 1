@@ -78,7 +78,7 @@ def convertir_html_a_word_pdf(carpeta_raiz):
 # USO DEL SCRIPT
 if __name__ == "__main__":
     # Configurar la carpeta raíz (modifica esta ruta)
-    carpeta_raiz = r"C:\Users\Erick Baez\Documents\calidad2025"
+    carpeta_raiz = r"C:\Users\45056372\Desktop\prueba its\calidad2025"
     
     # Ejecutar conversión
     convertir_html_a_word_pdf(carpeta_raiz)
