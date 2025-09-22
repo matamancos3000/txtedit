@@ -4,7 +4,6 @@ import urllib.parse
 import shutil
 import os
 import csv
-from datetime import datetime
 
 # ================== CONFIGURACIÓN ==================
 # Carpeta raíz que contiene todos los instructivos (con subcarpetas)
@@ -27,38 +26,41 @@ LOG_CSV = CARPETA_RAIZ.parent / "log_cambios.csv"
 def convertir_enlaces(contenido, ruta_html):
     """
     Convierte enlaces dentro de un HTML:
-    - Enlaces .htm/.html → .pdf en SharePoint (respetando ruta relativa).
-    - Archivos dentro de /Formatos2021/ → se respetan subcarpetas en la URL.
+    - Enlaces .htm/.html → .pdf en SharePoint (solo si contienen 'calidad2021/').
+    - Documentos en Formatos2021 → se cambian solo si contienen 'calidad2021/Formatos2021/'.
+    - Ignora enlaces a carpetas *_archivos (para no romper imágenes).
     """
     cambios = []
 
     def reemplazar_enlace(match):
         comilla = match.group(1)
-        nombre_archivo = match.group(2)
-        nombre_base, extension = os.path.splitext(os.path.basename(nombre_archivo))
+        enlace = match.group(2)
+        enlace_norm = enlace.replace("\\", "/")
+        nombre_base, extension = os.path.splitext(os.path.basename(enlace_norm))
         extension = extension.lower()
 
-        # Caso 1: enlaces a HTML → convertirlos en PDF
+        # Ignorar si apunta a carpeta de recursos (_archivos)
+        if "_archivos/" in enlace_norm or "_archivos\\" in enlace_norm:
+            return match.group(0)
+
+        # Caso 1: enlaces a HTML → convertirlos en PDF (si contienen calidad2021/)
         if extension in [".htm", ".html"]:
-            # ruta relativa desde la raíz
-            try:
-                ruta_relativa = Path(nombre_archivo).with_suffix(".pdf")
-            except Exception:
-                return match.group(0)
+            if "calidad2021/" in enlace_norm.lower():
+                partes = enlace_norm.lower().split("calidad2021/", 1)
+                if len(partes) == 2:
+                    ruta_relativa = Path(partes[1]).with_suffix(".pdf").as_posix()
+                    nuevo = f"{URL_SHAREPOINT}{ruta_relativa}"
+                    cambios.append((enlace, nuevo, "HTML->PDF"))
+                    return f'href={comilla}{nuevo}{comilla}'
+            return match.group(0)
 
-            nuevo = f"{URL_SHAREPOINT}{ruta_relativa.as_posix()}"
-            cambios.append((nombre_archivo, nuevo, "HTML->PDF"))
-            return f'href={comilla}{nuevo}{comilla}'
-
-        # Caso 2: documentos dentro de Formatos2021
+        # Caso 2: documentos dentro de calidad2021/Formatos2021/
         elif extension in [".docx", ".pdf", ".xlsx", ".pptx", ".doc", ".xls", ".xlsm"]:
-            ruta_normalizada = nombre_archivo.replace("\\", "/")
-            if f"/{CARPETA_DE_RECURSOS}/" in ruta_normalizada:
-                # conservar subcarpetas después de Formatos2021/
-                partes = ruta_normalizada.split(f"/{CARPETA_DE_RECURSOS}/", 1)
+            if "calidad2021/formatos2021/" in enlace_norm.lower():
+                partes = enlace_norm.lower().split("calidad2021/formatos2021/", 1)
                 if len(partes) == 2:
                     nuevo = f"{URL_SHAREPOINT}{CARPETA_DE_RECURSOS}/{partes[1]}"
-                    cambios.append((nombre_archivo, nuevo, extension.upper().strip(".")))
+                    cambios.append((enlace, nuevo, extension.upper().strip(".")))
                     return f'href={comilla}{nuevo}{comilla}'
             return match.group(0)
 
@@ -102,16 +104,14 @@ def copiar_estructura(html_path, output_dir):
 
 
 def registrar_cambios(archivo_html, cambios):
-    """Escribe cambios en el CSV log."""
+    """Escribe cambios en el CSV log (sin fecha)."""
     existe = LOG_CSV.exists()
     with open(LOG_CSV, 'a', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile)
         if not existe:
-            writer.writerow(["Fecha", "Archivo HTML", "Tipo", "Enlace original", "Enlace nuevo"])
-
-        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            writer.writerow(["Archivo HTML", "Tipo", "Enlace original", "Enlace nuevo"])
         for original, nuevo, tipo in cambios:
-            writer.writerow([fecha, archivo_html, tipo, original, nuevo])
+            writer.writerow([archivo_html, tipo, original, nuevo])
 
 
 # ================== PROCESO PRINCIPAL ==================
@@ -142,7 +142,6 @@ for html_file in CARPETA_RAIZ.rglob("*.[hH][tT][mM]*"):
 
         except Exception as e:
             print(f"   ❌ Error en {html_file.name}: {str(e)}")
-            # aunque haya error, registrar si había cambios detectados
             if cambios:
                 registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
                 print(f"   ⚠️ {len(cambios)} enlace(s) registrados en log pese al error")
