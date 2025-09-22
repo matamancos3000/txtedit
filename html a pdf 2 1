@@ -109,6 +109,7 @@ def copiar_estructura(html_path, output_dir):
     if carpeta_archivos.exists():
         dest_dir = output_dir / f"{html_name}_archivos"
         shutil.copytree(carpeta_archivos, dest_dir, dirs_exist_ok=True)
+        print(f"   📁 Carpeta de recursos copiada: {carpeta_archivos.name}")
 
 
 def registrar_cambios(archivo_html, cambios):
@@ -122,31 +123,12 @@ def registrar_cambios(archivo_html, cambios):
             writer.writerow([archivo_html, tipo, original, nuevo])
 
 
-def listar_html_sin_archivos(carpeta_raiz):
-    """
-    Recursivamente lista todos los archivos HTML/HTM, pero ignora completamente
-    cualquier carpeta que tenga '_archivos' en su nombre.
-    """
-    html_files = []
-    
-    def recorrer_carpeta(carpeta):
-        # Verificar si esta carpeta debe ser ignorada
-        if "_archivos" in carpeta.name:
-            print(f"⏭️  Ignorando completamente carpeta: {carpeta.relative_to(carpeta_raiz)}")
-            return
-        
-        # Recorrer elementos de la carpeta actual
-        for item in carpeta.iterdir():
-            if item.is_file():
-                # Verificar si es archivo HTML/HTM
-                if item.suffix.lower() in ['.htm', '.html']:
-                    html_files.append(item)
-            elif item.is_dir():
-                # Llamada recursiva para subcarpetas
-                recorrer_carpeta(item)
-    
-    recorrer_carpeta(carpeta_raiz)
-    return html_files
+def esta_en_carpeta_archivos(ruta_archivo):
+    """Verifica si el archivo está dentro de una carpeta que termine con '_archivos'"""
+    for parte in ruta_archivo.parts:
+        if parte.endswith('_archivos'):
+            return True
+    return False
 
 
 # ================== PROCESO PRINCIPAL ==================
@@ -154,35 +136,50 @@ print("Iniciando conversión en carpeta raíz:", CARPETA_RAIZ)
 procesados = set()
 total_modificados = 0
 
-# ✅ USAR NUESTRA PROPIA FUNCIÓN QUE IGNORA CARPETAS *_archivos
-html_files = listar_html_sin_archivos(CARPETA_RAIZ)
+for html_file in CARPETA_RAIZ.rglob("*.[hH][tT][mM]*"):
+    if html_file.is_file():
+        # ✅✅✅ VERIFICACIÓN CRÍTICA: Ignorar archivos en carpetas *_archivos
+        if esta_en_carpeta_archivos(html_file):
+            print(f"⏭️  IGNORADO (está en carpeta _archivos): {html_file.relative_to(CARPETA_RAIZ)}")
+            continue
 
-print(f"📁 Encontrados {len(html_files)} archivos HTML para procesar (ignorando carpetas _archivos)")
+        if html_file not in procesados:
+            print(f"\n● Procesando: {html_file.relative_to(CARPETA_RAIZ)}")
+            procesados.add(html_file)
 
-for html_file in html_files:
-    if html_file not in procesados:
-        print(f"\n● Procesando: {html_file.relative_to(CARPETA_RAIZ)}")
-        procesados.add(html_file)
+            cambios = []
+            try:
+                # LEER contenido original
+                encoding_detectado = 'utf-8'
+                try:
+                    with open(html_file, 'r', encoding='utf-8') as f:
+                        contenido_original = f.read()
+                except UnicodeDecodeError:
+                    encoding_detectado = 'latin-1'
+                    with open(html_file, 'r', encoding='latin-1') as f:
+                        contenido_original = f.read()
 
-        cambios = []
-        try:
-            contenido, encoding_original, cambios = procesar_html(html_file)
-            html_file.write_text(contenido, encoding=encoding_original)
-            copiar_estructura(html_file, html_file.parent)
+                # PROCESAR enlaces
+                contenido_modificado, cambios = convertir_enlaces(contenido_original, html_file)
+                
+                # ESCRIBIR solo si hay cambios
+                if cambios:
+                    html_file.write_text(contenido_modificado, encoding=encoding_detectado)
+                    registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
+                    num = len(cambios)
+                    total_modificados += num
+                    print(f"   ✅ {num} enlace(s) modificado(s)")
+                else:
+                    print("   ⚠️ No se encontraron enlaces relevantes - archivo sin cambios")
 
-            if cambios:
-                registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
-                num = len(cambios)
-                total_modificados += num
-                print(f"   ✅ {num} enlace(s) modificado(s)")
-            else:
-                print("   ⚠️ No se encontraron enlaces relevantes")
+                # COPIAR carpeta de recursos
+                copiar_estructura(html_file, html_file.parent)
 
-        except Exception as e:
-            print(f"   ❌ Error en {html_file.name}: {str(e)}")
-            if cambios:
-                registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
-                print(f"   ⚠️ {len(cambios)} enlace(s) registrados en log pese al error")
+            except Exception as e:
+                print(f"   ❌ Error en {html_file.name}: {str(e)}")
+                if cambios:
+                    registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
+                    print(f"   ⚠️ {len(cambios)} enlace(s) registrados en log pese al error")
 
 print("\n✔ Proceso completado.")
 print(f"📑 Log de cambios en: {LOG_CSV}")
