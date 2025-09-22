@@ -129,8 +129,9 @@ total_modificados = 0
 
 for html_file in CARPETA_RAIZ.rglob("*.[hH][tT][mM]*"):
     if html_file.is_file():
-        # ❌ Saltar archivos dentro de cualquier carpeta *_archivos
-        if any("_archivos" in part.lower() for part in html_file.parts):
+        # ✅ MODIFICACIÓN IMPORTANTE: Ignorar archivos en carpetas *_archivos
+        if any("_archivos" in part for part in html_file.parts):
+            print(f"⏭️  Saltando archivo en carpeta _archivos: {html_file.relative_to(CARPETA_RAIZ)}")
             continue
 
         if html_file not in procesados:
