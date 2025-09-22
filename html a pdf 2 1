@@ -18,7 +18,6 @@ def convertir_enlaces(contenido, ruta_html):
     - .htm/.html -> .pdf en SharePoint (si contienen 'calidad2021/' o si son relativos dentro del árbol).
       IMPORTANTE: elimina cualquier #ancla en los .pdf.
     - Documentos (docx,xlsx,..) -> si contienen 'calidad2021/Formatos2021/'.
-    - No modificar archivos que estén dentro de carpetas *_archivos.
     """
     cambios = []
 
@@ -102,45 +101,33 @@ def procesar_html(html_path):
     return contenido_modificado, encoding_detectado, cambios
 
 
-def copiar_estructura(html_path, output_dir):
-    """Copia carpeta de recursos asociada (_archivos) de manera segura."""
+def copiar_estructura_simple(html_path, output_dir):
+    """Copia carpeta de recursos asociada (_archivos) de manera simple y segura."""
     html_name = html_path.stem
     carpeta_archivos = html_path.parent / f"{html_name}_archivos"
     
     if carpeta_archivos.exists() and carpeta_archivos.is_dir():
         dest_dir = output_dir / f"{html_name}_archivos"
         
-        print(f"   📁 Copiando carpeta de recursos: {carpeta_archivos.name}")
-        print(f"   📊 Tamaño carpeta origen: {sum(f.stat().st_size for f in carpeta_archivos.rglob('*') if f.is_file())} bytes")
-        print(f"   📂 Archivos en origen: {len(list(carpeta_archivos.rglob('*')))} elementos")
+        print(f"   📁 Copiando: {carpeta_archivos.name}")
         
         try:
-            # Verificar si la carpeta destino ya existe
+            # Si la carpeta destino ya existe, eliminarla
             if dest_dir.exists():
-                print(f"   🔄 Carpeta destino ya existe, eliminando...")
                 shutil.rmtree(dest_dir)
             
-            # Copiar TODO el contenido de la carpeta _archivos
+            # Copiar toda la carpeta
             shutil.copytree(carpeta_archivos, dest_dir)
+            print(f"   ✅ Carpeta copiada: {len(list(carpeta_archivos.rglob('*')))} elementos")
             
-            # Verificar que la copia se hizo correctamente
-            if dest_dir.exists():
-                tamaño_destino = sum(f.stat().st_size for f in dest_dir.rglob('*') if f.is_file())
-                archivos_destino = len(list(dest_dir.rglob('*')))
-                print(f"   ✅ Carpeta copiada exitosamente")
-                print(f"   📊 Tamaño carpeta destino: {tamaño_destino} bytes")
-                print(f"   📂 Archivos en destino: {archivos_destino} elementos")
-            else:
-                print(f"   ❌ Error: Carpeta destino no se creó")
-                
         except Exception as e:
-            print(f"   ❌ Error copiando carpeta {carpeta_archivos.name}: {str(e)}")
+            print(f"   ❌ Error copiando carpeta: {str(e)}")
     else:
-        print(f"   ⚠️ No se encontró carpeta de recursos: {carpeta_archivos.name}")
+        print(f"   ⚠️ No existe carpeta de recursos: {html_name}_archivos")
 
 
 def registrar_cambios(archivo_html, cambios):
-    """Escribe cambios en el CSV log (sin fecha)."""
+    """Escribe cambios en el CSV log."""
     existe = LOG_CSV.exists()
     with open(LOG_CSV, 'a', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile)
@@ -150,14 +137,6 @@ def registrar_cambios(archivo_html, cambios):
             writer.writerow([archivo_html, tipo, original, nuevo])
 
 
-def esta_en_carpeta_archivos(ruta_archivo):
-    """Verifica si el archivo está dentro de una carpeta que termine con '_archivos'"""
-    for parte in ruta_archivo.parts:
-        if parte.endswith('_archivos'):
-            return True
-    return False
-
-
 # ================== PROCESO PRINCIPAL ==================
 print("Iniciando conversión en carpeta raíz:", CARPETA_RAIZ)
 procesados = set()
@@ -165,36 +144,35 @@ total_modificados = 0
 
 for html_file in CARPETA_RAIZ.rglob("*.[hH][tT][mM]*"):
     if html_file.is_file():
-        # Ignorar archivos en carpetas _archivos
-        if esta_en_carpeta_archivos(html_file):
-            print(f"⏭️  IGNORADO (está en carpeta _archivos): {html_file.relative_to(CARPETA_RAIZ)}")
+        # ✅ PROCESAR TODOS los archivos HTML, incluyendo header.htm
+        # Solo ignorar si están dentro de carpetas *_archivos
+        if any(part.endswith('_archivos') for part in html_file.parts):
+            print(f"⏭️  Ignorando (dentro de _archivos): {html_file.relative_to(CARPETA_RAIZ)}")
             continue
 
         if html_file not in procesados:
             print(f"\n● Procesando: {html_file.relative_to(CARPETA_RAIZ)}")
-            print(f"   📊 Tamaño archivo: {html_file.stat().st_size} bytes")
             procesados.add(html_file)
 
             cambios = []
             try:
+                # Procesar el HTML
                 contenido, encoding_original, cambios = procesar_html(html_file)
-                
-                # Escribir el archivo HTML principal
                 html_file.write_text(contenido, encoding=encoding_original)
                 
-                # COPIAR LA CARPETA DE RECURSOS (esta es la parte crítica)
-                copiar_estructura(html_file, html_file.parent)
+                # Copiar carpeta de recursos (si existe)
+                copiar_estructura_simple(html_file, html_file.parent)
 
                 if cambios:
                     registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
                     num = len(cambios)
                     total_modificados += num
-                    print(f"   ✅ {num} enlace(s) modificado(s) en el HTML principal")
+                    print(f"   ✅ {num} enlace(s) modificado(s)")
                 else:
-                    print("   ⚠️ No se encontraron enlaces relevantes en el HTML principal")
+                    print("   ⚠️ No se encontraron enlaces relevantes")
 
             except Exception as e:
-                print(f"   ❌ Error en {html_file.name}: {str(e)}")
+                print(f"   ❌ Error: {str(e)}")
                 if cambios:
                     registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
 
