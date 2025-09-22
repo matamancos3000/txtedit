@@ -101,29 +101,26 @@ def procesar_html(html_path):
     return contenido_modificado, encoding_detectado, cambios
 
 
-def copiar_estructura_simple(html_path, output_dir):
-    """Copia carpeta de recursos asociada (_archivos) de manera simple y segura."""
+def copiar_estructura_segura(html_path):
+    """Copia carpeta de recursos asociada (_archivos) SIN ELIMINAR LA ORIGINAL."""
     html_name = html_path.stem
-    carpeta_archivos = html_path.parent / f"{html_name}_archivos"
+    carpeta_archivos_origen = html_path.parent / f"{html_name}_archivos"
     
-    if carpeta_archivos.exists() and carpeta_archivos.is_dir():
-        dest_dir = output_dir / f"{html_name}_archivos"
+    if carpeta_archivos_origen.exists() and carpeta_archivos_origen.is_dir():
+        print(f"   📁 Carpeta de recursos encontrada: {carpeta_archivos_origen.name}")
         
-        print(f"   📁 Copiando: {carpeta_archivos.name}")
+        # Verificar contenido de la carpeta original
+        archivos_origen = list(carpeta_archivos_origen.rglob('*'))
+        print(f"   📂 Contenido original: {len(archivos_origen)} elementos")
         
-        try:
-            # Si la carpeta destino ya existe, eliminarla
-            if dest_dir.exists():
-                shutil.rmtree(dest_dir)
-            
-            # Copiar toda la carpeta
-            shutil.copytree(carpeta_archivos, dest_dir)
-            print(f"   ✅ Carpeta copiada: {len(list(carpeta_archivos.rglob('*')))} elementos")
-            
-        except Exception as e:
-            print(f"   ❌ Error copiando carpeta: {str(e)}")
+        # La carpeta destino es la misma que la origen (no hacemos copia, solo verificamos)
+        # En realidad, no necesitamos copiar si estamos trabajando en el mismo lugar
+        print(f"   ✅ Carpeta de recursos preservada en su ubicación original")
+        
+        return True
     else:
         print(f"   ⚠️ No existe carpeta de recursos: {html_name}_archivos")
+        return False
 
 
 def registrar_cambios(archivo_html, cambios):
@@ -144,7 +141,6 @@ total_modificados = 0
 
 for html_file in CARPETA_RAIZ.rglob("*.[hH][tT][mM]*"):
     if html_file.is_file():
-        # ✅ PROCESAR TODOS los archivos HTML, incluyendo header.htm
         # Solo ignorar si están dentro de carpetas *_archivos
         if any(part.endswith('_archivos') for part in html_file.parts):
             print(f"⏭️  Ignorando (dentro de _archivos): {html_file.relative_to(CARPETA_RAIZ)}")
@@ -160,8 +156,8 @@ for html_file in CARPETA_RAIZ.rglob("*.[hH][tT][mM]*"):
                 contenido, encoding_original, cambios = procesar_html(html_file)
                 html_file.write_text(contenido, encoding=encoding_original)
                 
-                # Copiar carpeta de recursos (si existe)
-                copiar_estructura_simple(html_file, html_file.parent)
+                # SOLO VERIFICAR la carpeta de recursos, NO COPIAR
+                copiar_estructura_segura(html_file)
 
                 if cambios:
                     registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
