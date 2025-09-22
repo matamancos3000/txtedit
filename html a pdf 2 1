@@ -14,15 +14,20 @@ LOG_CSV = CARPETA_RAIZ.parent / "log_cambios.csv"
 # ================== FUNCIONES ==================
 def convertir_enlaces(contenido, ruta_html):
     """
-    Convierte enlaces dentro de un HTML.
+    Convierte enlaces dentro de un HTML:
+    - .htm/.html -> .pdf en SharePoint (si contienen 'calidad2021/' o si son relativos dentro del árbol).
+      IMPORTANTE: elimina cualquier #ancla en los .pdf.
+    - Documentos (docx,xlsx,..) -> si contienen 'calidad2021/Formatos2021/'.
+    - No modificar archivos que estén dentro de carpetas *_archivos.
     """
     cambios = []
 
     def reemplazar_enlace(match):
         comilla = match.group(1)
-        enlace = match.group(2)
+        enlace = match.group(2)  # sin comillas
         enlace_norm = enlace.replace("\\", "/")
 
+        # separar fragmento (#...) si existe
         if "#" in enlace_norm:
             ruta_sin_fragmento, _ = enlace_norm.split("#", 1)
         else:
@@ -31,6 +36,7 @@ def convertir_enlaces(contenido, ruta_html):
         nombre_base, extension = os.path.splitext(os.path.basename(ruta_sin_fragmento))
         extension = extension.lower()
 
+        # ----- Caso: .htm/.html -----
         if extension in [".htm", ".html"]:
             m = re.search(r'calidad2021/', ruta_sin_fragmento, flags=re.IGNORECASE)
             if m:
@@ -59,6 +65,7 @@ def convertir_enlaces(contenido, ruta_html):
             except Exception:
                 return match.group(0)
 
+        # ----- Caso: documentos (docx/pdf/xlsx/...) -----
         elif extension in [".docx", ".pdf", ".xlsx", ".pptx", ".doc", ".xls", ".xlsm"]:
             m = re.search(r'calidad2021/formatos2021/', ruta_sin_fragmento, flags=re.IGNORECASE)
             if m:
@@ -80,33 +87,67 @@ def convertir_enlaces(contenido, ruta_html):
     return nuevo_contenido, cambios
 
 
-def leer_archivo_seguro(ruta_archivo):
-    """Lee un archivo de manera segura con múltiples codificaciones."""
-    codificaciones = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
-    
-    for encoding in codificaciones:
-        try:
-            with open(ruta_archivo, 'r', encoding=encoding) as f:
-                contenido = f.read()
-            print(f"   📖 Leído con encoding: {encoding} ({len(contenido)} caracteres)")
-            return contenido, encoding, True
-        except UnicodeDecodeError:
-            continue
-        except Exception as e:
-            print(f"   ❌ Error leyendo con {encoding}: {e}")
-            continue
-    
-    # Último intento: lectura binaria
+def procesar_html(html_path):
+    """Lee un HTML y convierte enlaces."""
+    encoding_detectado = 'utf-8'
     try:
-        with open(ruta_archivo, 'rb') as f:
-            contenido_bytes = f.read()
-        # Intentar decodificar como UTF-8 con reemplazo de errores
-        contenido = contenido_bytes.decode('utf-8', errors='replace')
-        print(f"   📖 Leído en modo binario y decodificado ({len(contenido)} caracteres)")
-        return contenido, 'utf-8', True
-    except Exception as e:
-        print(f"   ❌ Error crítico leyendo archivo: {e}")
-        return "", 'utf-8', False
+        with open(html_path, 'r', encoding='utf-8') as f:
+            contenido = f.read()
+    except UnicodeDecodeError:
+        encoding_detectado = 'latin-1'
+        with open(html_path, 'r', encoding='latin-1') as f:
+            contenido = f.read()
+
+    contenido_modificado, cambios = convertir_enlaces(contenido, html_path)
+    return contenido_modificado, encoding_detectado, cambios
+
+
+def copiar_estructura(html_path, output_dir):
+    """Copia carpeta de recursos asociada (_archivos) de manera segura."""
+    html_name = html_path.stem
+    carpeta_archivos = html_path.parent / f"{html_name}_archivos"
+    
+    if carpeta_archivos.exists() and carpeta_archivos.is_dir():
+        dest_dir = output_dir / f"{html_name}_archivos"
+        
+        print(f"   📁 Copiando carpeta de recursos: {carpeta_archivos.name}")
+        print(f"   📊 Tamaño carpeta origen: {sum(f.stat().st_size for f in carpeta_archivos.rglob('*') if f.is_file())} bytes")
+        print(f"   📂 Archivos en origen: {len(list(carpeta_archivos.rglob('*')))} elementos")
+        
+        try:
+            # Verificar si la carpeta destino ya existe
+            if dest_dir.exists():
+                print(f"   🔄 Carpeta destino ya existe, eliminando...")
+                shutil.rmtree(dest_dir)
+            
+            # Copiar TODO el contenido de la carpeta _archivos
+            shutil.copytree(carpeta_archivos, dest_dir)
+            
+            # Verificar que la copia se hizo correctamente
+            if dest_dir.exists():
+                tamaño_destino = sum(f.stat().st_size for f in dest_dir.rglob('*') if f.is_file())
+                archivos_destino = len(list(dest_dir.rglob('*')))
+                print(f"   ✅ Carpeta copiada exitosamente")
+                print(f"   📊 Tamaño carpeta destino: {tamaño_destino} bytes")
+                print(f"   📂 Archivos en destino: {archivos_destino} elementos")
+            else:
+                print(f"   ❌ Error: Carpeta destino no se creó")
+                
+        except Exception as e:
+            print(f"   ❌ Error copiando carpeta {carpeta_archivos.name}: {str(e)}")
+    else:
+        print(f"   ⚠️ No se encontró carpeta de recursos: {carpeta_archivos.name}")
+
+
+def registrar_cambios(archivo_html, cambios):
+    """Escribe cambios en el CSV log (sin fecha)."""
+    existe = LOG_CSV.exists()
+    with open(LOG_CSV, 'a', newline='', encoding='utf-8') as csvfile:
+        writer = csv.writer(csvfile)
+        if not existe:
+            writer.writerow(["Archivo HTML", "Tipo", "Enlace original", "Enlace nuevo"])
+        for original, nuevo, tipo in cambios:
+            writer.writerow([archivo_html, tipo, original, nuevo])
 
 
 def esta_en_carpeta_archivos(ruta_archivo):
@@ -117,119 +158,46 @@ def esta_en_carpeta_archivos(ruta_archivo):
     return False
 
 
-def copiar_estructura(html_path, output_dir):
-    """Copia carpeta de recursos asociada (_archivos)."""
-    html_name = html_path.stem
-    carpeta_archivos = html_path.parent / f"{html_name}_archivos"
-    if carpeta_archivos.exists():
-        dest_dir = output_dir / f"{html_name}_archivos"
-        shutil.copytree(carpeta_archivos, dest_dir, dirs_exist_ok=True)
-        print(f"   📁 Carpeta de recursos copiada: {carpeta_archivos.name}")
-
-
-def registrar_cambios(archivo_html, cambios):
-    """Escribe cambios en el CSV log."""
-    existe = LOG_CSV.exists()
-    with open(LOG_CSV, 'a', newline='', encoding='utf-8') as csvfile:
-        writer = csv.writer(csvfile)
-        if not existe:
-            writer.writerow(["Archivo HTML", "Tipo", "Enlace original", "Enlace nuevo"])
-        for original, nuevo, tipo in cambios:
-            writer.writerow([archivo_html, tipo, original, nuevo])
-
-
-def hacer_backup(archivo_original):
-    """Crea un backup del archivo original."""
-    backup_path = archivo_original.with_suffix(archivo_original.suffix + '.backup')
-    try:
-        shutil.copy2(archivo_original, backup_path)
-        print(f"   💾 Backup creado: {backup_path.name}")
-        return True
-    except Exception as e:
-        print(f"   ⚠️ No se pudo crear backup: {e}")
-        return False
-
-
 # ================== PROCESO PRINCIPAL ==================
 print("Iniciando conversión en carpeta raíz:", CARPETA_RAIZ)
 procesados = set()
 total_modificados = 0
-archivos_con_errores = 0
 
 for html_file in CARPETA_RAIZ.rglob("*.[hH][tT][mM]*"):
     if html_file.is_file():
         # Ignorar archivos en carpetas _archivos
         if esta_en_carpeta_archivos(html_file):
-            print(f"⏭️  IGNORADO (carpeta _archivos): {html_file.relative_to(CARPETA_RAIZ)}")
+            print(f"⏭️  IGNORADO (está en carpeta _archivos): {html_file.relative_to(CARPETA_RAIZ)}")
             continue
 
         if html_file not in procesados:
             print(f"\n● Procesando: {html_file.relative_to(CARPETA_RAIZ)}")
-            print(f"   📊 Tamaño original: {html_file.stat().st_size} bytes")
+            print(f"   📊 Tamaño archivo: {html_file.stat().st_size} bytes")
             procesados.add(html_file)
 
             cambios = []
             try:
-                # 1. HACER BACKUP primero
-                backup_ok = hacer_backup(html_file)
+                contenido, encoding_original, cambios = procesar_html(html_file)
                 
-                # 2. LEER archivo de manera segura
-                contenido, encoding, exito_lectura = leer_archivo_seguro(html_file)
+                # Escribir el archivo HTML principal
+                html_file.write_text(contenido, encoding=encoding_original)
                 
-                if not exito_lectura or len(contenido) == 0:
-                    print(f"   ❌ No se pudo leer el archivo o está vacío")
-                    archivos_con_errores += 1
-                    continue
-                
-                # 3. VERIFICAR que el contenido no esté vacío
-                if len(contenido.strip()) == 0:
-                    print(f"   ⚠️ Archivo vacío, saltando...")
-                    continue
-                
-                # 4. PROCESAR enlaces
-                contenido_modificado, cambios = convertir_enlaces(contenido, html_file)
-                
-                # 5. VERIFICAR que el contenido modificado no esté vacío
-                if len(contenido_modificado.strip()) == 0:
-                    print(f"   ❌ El contenido procesado está vacío! Restaurando desde backup...")
-                    if backup_ok:
-                        backup_path = html_file.with_suffix(html_file.suffix + '.backup')
-                        shutil.copy2(backup_path, html_file)
-                        print(f"   🔄 Archivo restaurado desde backup")
-                    archivos_con_errores += 1
-                    continue
-                
-                # 6. ESCRIBIR solo si hay cambios y el contenido es válido
+                # COPIAR LA CARPETA DE RECURSOS (esta es la parte crítica)
+                copiar_estructura(html_file, html_file.parent)
+
                 if cambios:
-                    html_file.write_text(contenido_modificado, encoding=encoding)
                     registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
                     num = len(cambios)
                     total_modificados += num
-                    
-                    # Verificar que el archivo no quede vacío
-                    tamaño_final = html_file.stat().st_size
-                    print(f"   ✅ {num} enlace(s) modificado(s)")
-                    print(f"   📊 Tamaño final: {tamaño_final} bytes")
-                    
-                    if tamaño_final == 0:
-                        print(f"   ❌ ARCHIVO QUEDÓ VACÍO! Restaurando...")
-                        if backup_ok:
-                            backup_path = html_file.with_suffix(html_file.suffix + '.backup')
-                            shutil.copy2(backup_path, html_file)
+                    print(f"   ✅ {num} enlace(s) modificado(s) en el HTML principal")
                 else:
-                    print("   ⚠️ No se encontraron enlaces relevantes - archivo sin cambios")
-                
-                # 7. COPIAR recursos
-                copiar_estructura(html_file, html_file.parent)
+                    print("   ⚠️ No se encontraron enlaces relevantes en el HTML principal")
 
             except Exception as e:
-                print(f"   ❌ Error procesando {html_file.name}: {str(e)}")
-                archivos_con_errores += 1
+                print(f"   ❌ Error en {html_file.name}: {str(e)}")
                 if cambios:
                     registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
 
 print("\n✔ Proceso completado.")
 print(f"📑 Log de cambios en: {LOG_CSV}")
 print(f"🔁 Enlaces totales modificados: {total_modificados}")
-print(f"❌ Archivos con errores: {archivos_con_errores}")
-print(f"📊 Archivos procesados exitosamente: {len(procesados) - archivos_con_errores}")
