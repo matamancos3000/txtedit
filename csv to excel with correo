@@ -1,0 +1,199 @@
+import os
+import pandas as pd
+import re
+from datetime import datetime, timedelta
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill
+from openpyxl.chart import BarChart, Reference
+from tresenviarcorreo import generar_correo, seleccionar_confidencialidad_y_enviar
+
+# === CONFIGURACIÓN ===
+input_folder = r"C:\Logs-Reporttoken"
+output_folder = r"C:\Logs-Reporttoken\Procesados"
+os.makedirs(output_folder, exist_ok=True)
+
+ENVIAR_CORREO = True  # <<< Cambia a False si NO quieres enviar correo
+
+# === FUNCIONES AUXILIARES ===
+def parse_fecha_trabajo(valor):
+    if pd.isna(valor):
+        return None
+    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"):
+        try:
+            return datetime.strptime(str(valor), fmt)
+        except:
+            continue
+    return None
+
+def parse_fecha_nac(valor):
+    if pd.isna(valor):
+        return None
+    valor = str(valor).lower().replace("a. m.", "AM").replace("p. m.", "PM")
+    for fmt in ("%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %I:%M %p", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(valor, fmt)
+        except:
+            continue
+    return None
+
+def calcular_minutos(row):
+    created, trabajado = row.get("CreatedOn"), row.get("FECHA DE TRABAJO")
+    if pd.isna(created) or trabajado is None:
+        return None
+    if created.hour >= 22 or created.hour < 6:
+        return "Horario bot inactivo"
+    return round((trabajado - created).total_seconds() / 60)
+
+def clasificar_intervalo(valor):
+    if isinstance(valor, str):
+        return valor
+    if pd.isna(valor):
+        return None
+    if valor <= 10:
+        return "menos de 10 minutos"
+    elif valor <= 20:
+        return "de 11 a 20 minutos"
+    elif valor <= 30:
+        return "de 21 a 30 minutos"
+    elif valor <= 60:
+        return "de 30 a 60 minutos"
+    else:
+        return "más de 60 minutos"
+
+def limpiar_detalles(texto):
+    if not isinstance(texto, str):
+        return texto
+    texto = texto.strip()
+    if re.match(r"^El restablecimiento fuera de línea no se pudo completar por estado: 'Aprobado'", texto, re.IGNORECASE):
+        return "Aprobado por otro medio"
+    elif re.match(r"^El restablecimiento fuera de línea no se pudo completar por estado:", texto, re.IGNORECASE):
+        return "No tiene Solicitud vigente"
+    elif re.search(r"Error de sistema", texto, re.IGNORECASE):
+        return "Error de sistema"
+    elif re.match(r"^Productos y Servicios.*", texto, re.IGNORECASE):
+        return "Error en obtener registro por voz"
+    return texto
+
+def mostrar_progreso(paso, total_pasos, archivo):
+    porcentaje = round((paso / total_pasos) * 100, 2)
+    print(f"   📂 Generando {archivo}... {porcentaje}%")
+
+# === PROCESAR TODOS LOS CSV ===
+archivos = [f for f in os.listdir(input_folder) if f.lower().endswith(".csv")]
+total = len(archivos)
+
+for idx, file in enumerate(archivos, start=1):
+    porcentaje = round((idx / total) * 100, 2)
+    print(f"🔄 Procesando {file}... ({idx}/{total}, {porcentaje}%)")
+
+    input_file = os.path.join(input_folder, file)
+    output_file = os.path.join(output_folder, file.replace(".csv", "-procesado.xlsx"))
+
+    # === LEER ARCHIVO ===
+    df = pd.read_csv(input_file, encoding="utf-8-sig", dtype={"MSISDN": str})
+
+    # Validar columnas mínimas
+    columnas_necesarias = ["CreatedOn", "FECHA DE TRABAJO", "FECHA DE NACIMIENTO", "DETALLES"]
+    for col in columnas_necesarias:
+        if col not in df.columns:
+            raise ValueError(f"❌ Falta la columna requerida: {col}")
+
+    # === PARSEAR FECHAS ===
+    df["CreatedOn"] = pd.to_datetime(df["CreatedOn"], format="%b %d %Y %I:%M%p", errors="coerce") + timedelta(hours=6)
+    df["FECHA DE TRABAJO"] = df["FECHA DE TRABAJO"].apply(parse_fecha_trabajo)
+    df["FECHA DE NACIMIENTO"] = df["FECHA DE NACIMIENTO"].apply(parse_fecha_nac)
+
+    # === CALCULOS ===
+    df["Minutos de respuesta"] = df.apply(calcular_minutos, axis=1)
+    df["Intervalo"] = df["Minutos de respuesta"].apply(clasificar_intervalo)
+
+    # DETALLES vacío → Error de sistema
+    df["DETALLES"] = df["DETALLES"].apply(
+        lambda x: "Error de sistema" if pd.isna(x) or str(x).strip() == "" else limpiar_detalles(x)
+    )
+
+    # ORDENAR LOGS POR FECHA
+    df["Fecha"] = df["CreatedOn"].dt.strftime("%d/%m/%Y")
+    df = df.sort_values(by="Fecha", ascending=True)
+
+    # === RESUMEN POR DÍA + INTERVALO ===
+    pivot = pd.pivot_table(
+        df,
+        index="Fecha",
+        columns="Intervalo",
+        values="MSISDN",
+        aggfunc="count",
+        fill_value=0
+    )
+    orden_intervalos = [
+        "menos de 10 minutos", "de 11 a 20 minutos",
+        "de 21 a 30 minutos", "de 30 a 60 minutos",
+        "más de 60 minutos", "Horario bot inactivo"
+    ]
+    pivot = pivot.reindex(columns=orden_intervalos, fill_value=0)
+    pivot["Total"] = pivot.sum(axis=1)
+    pivot = pivot.sort_index(ascending=True)
+
+    # === RESUMEN POR DETALLES ===
+    resumen_detalles = df["DETALLES"].value_counts().reset_index()
+    resumen_detalles.columns = ["DETALLES", "Cantidad"]
+
+    # === EXPORTAR A EXCEL ===
+    pasos_totales = 5
+    paso_actual = 0
+
+    # 1) Exportar datos
+    with pd.ExcelWriter(output_file, engine="openpyxl",
+                        date_format="DD/MM/YYYY HH:MM:SS",
+                        datetime_format="DD/MM/YYYY HH:MM:SS") as writer:
+        df.to_excel(writer, sheet_name="Logs", index=False)
+        pivot.to_excel(writer, sheet_name="Resumen", startrow=0, index=True)
+        resumen_detalles.to_excel(writer, sheet_name="Resumen", startrow=pivot.shape[0] + 4, index=False)
+    paso_actual += 1
+    mostrar_progreso(paso_actual, pasos_totales, file)
+
+    # 2) Formato Logs
+    wb = load_workbook(output_file)
+    ws_logs = wb["Logs"]
+    for cell in ws_logs[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+    paso_actual += 1
+    mostrar_progreso(paso_actual, pasos_totales, file)
+
+    # 3) Formato Resumen
+    ws_resumen = wb["Resumen"]
+    for cell in ws_resumen[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+    paso_actual += 1
+    mostrar_progreso(paso_actual, pasos_totales, file)
+
+    # 4) Insertar gráfica
+    max_row = pivot.shape[0] + 1
+    max_col = pivot.shape[1] + 1
+    chart = BarChart()
+    data = Reference(ws_resumen, min_col=2, max_col=max_col, min_row=1, max_row=max_row)
+    cats = Reference(ws_resumen, min_col=1, min_row=2, max_row=max_row)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    chart.title = "Distribución por Intervalos (diario)"
+    chart.y_axis.title = "Cantidad"
+    chart.x_axis.title = "Fecha"
+    chart.width = 27
+    chart.height = 20
+    ws_resumen.add_chart(chart, f"I2")
+    paso_actual += 1
+    mostrar_progreso(paso_actual, pasos_totales, file)
+
+    # 5) Guardar
+    wb.save(output_file)
+    paso_actual += 1
+    mostrar_progreso(paso_actual, pasos_totales, file)
+
+    print(f"✅ Archivo generado: {output_file}\n")
+
+    # === ENVÍO DE CORREO (opcional) ===
+    if ENVIAR_CORREO:
+        generar_correo(output_file)
+        seleccionar_confidencialidad_y_enviar()
