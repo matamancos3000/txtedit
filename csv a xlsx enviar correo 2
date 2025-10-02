@@ -227,18 +227,28 @@ def crear_grafico(ws_resumen, pivot_shape):
     chart.width = 34
     chart.height = 17
     
+    # 🔧 SOLUCIÓN DEFINITIVA: Colores por posición (más estable)
+    colores_series = [
+        "00FF00",    # verde - menos de 10 minutos
+        "90EE90",    # verde claro - de 11 a 20 minutos  
+        "FFFF00",    # amarillo - de 21 a 30 minutos
+        "FFA500",    # naranja - de 30 a 60 minutos
+        "FF0000",    # rojo - más de 60 minutos
+        "000000",    # negro - Horario bot inactivo
+        "808080"     # gris - Total
+    ]
+    
     # Aplicar colores
-    series_names = [s.name for s in chart.series]
     for i, serie in enumerate(chart.series):
-        nombre_serie = series_names[i] if i < len(series_names) else None
-        color = COLORES_INTERVALOS.get(nombre_serie, "808080")
-        
-        try:
-            serie.graphicalProperties.solidFill = color
-        except Exception:
-            dp = DataPoint(idx=0)
-            dp.graphicalProperties.solidFill = color
-            serie.dPt = [dp]
+        if i < len(colores_series):
+            color = colores_series[i]
+            try:
+                serie.graphicalProperties.solidFill = color
+                # Para la línea (última serie)
+                if i == len(chart.series) - 1:
+                    serie.graphicalProperties.line.solidFill = color
+            except Exception as e:
+                print(f"⚠️  No se pudo aplicar color a la serie {i}: {e}")
     
     return chart
 
