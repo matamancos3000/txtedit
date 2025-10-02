@@ -13,7 +13,7 @@ input_folder = r"C:\Logs-Reporttoken"
 output_folder = r"C:\Logs-Reporttoken\Procesados"
 os.makedirs(output_folder, exist_ok=True)
 
-ENVIAR_CORREO = False  # <<< Cambia a False si NO quieres enviar correo
+ENVIAR_CORREO = True  # <<< Cambia a False si NO quieres enviar correo
 
 # === FUNCIONES AUXILIARES ===
 def parse_fecha_trabajo(valor):
@@ -192,12 +192,10 @@ for idx, file in enumerate(archivos, start=1):
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
 
-    # También aplicar estilo al encabezado del top_msisdn (está en la misma fila, columnas D y E)
-    # (ya cubierto por el bucle anterior al colorear toda la fila)
     paso_actual += 1
     mostrar_progreso(paso_actual, pasos_totales, file)
 
-    # 4) Insertar gráfica con colores (usamos el order de pivot.columns para asignar colores)
+    # 4) Insertar gráfica con colores (asignamos color por posición según pivot.columns)
     max_row = pivot.shape[0] + 1
     max_col = pivot.shape[1] + 1
     chart = BarChart()
@@ -222,18 +220,21 @@ for idx, file in enumerate(archivos, start=1):
         "Total": "808080"                  # gris
     }
 
-    # Asignar colores por posición (evita usar serie.tx.get_text())
+    # Asignar colores por posición (robusto y compatible)
     series_names = list(pivot.columns)  # orden exacto de las columnas del pivot
     for i, serie in enumerate(chart.series):
         if i < len(series_names):
             nombre_serie = series_names[i]
             color = colores_intervalos.get(nombre_serie)
             if color:
-                # aplicar color a todos los puntos de la serie
-                for pt in serie.points:
-                    dp = DataPoint()
+                try:
+                    # Método preferible: colorear la serie completa
+                    serie.graphicalProperties.solidFill = color
+                except Exception:
+                    # Fallback: colorear por DataPoint (si alguna versión lo requiere)
+                    dp = DataPoint(idx=0)
                     dp.graphicalProperties.solidFill = color
-                    pt.dPt = dp
+                    serie.dPt = [dp]
 
     ws_resumen.add_chart(chart, f"I2")
     paso_actual += 1
