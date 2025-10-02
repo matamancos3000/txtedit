@@ -62,6 +62,7 @@ def clasificar_intervalo(valor):
         return "más de 60 minutos"
 
 def limpiar_detalles(texto):
+    # Si no es string o está vacío -> Error de sistema
     if not isinstance(texto, str):
         return "Error de sistema"
     texto = texto.strip()
@@ -110,10 +111,10 @@ for idx, file in enumerate(archivos, start=1):
     df["Minutos de respuesta"] = df.apply(calcular_minutos, axis=1)
     df["Intervalo"] = df["Minutos de respuesta"].apply(clasificar_intervalo)
 
-    # DETALLES vacío → Error de sistema
+    # DETALLES vacío → Error de sistema (limpiar_detalles lo cubre)
     df["DETALLES"] = df["DETALLES"].apply(limpiar_detalles)
 
-    # ORDENAR LOGS POR CreatedOn
+    # ORDENAR LOGS POR CreatedOn (fecha + hora reales)
     df["Fecha"] = df["CreatedOn"].dt.date
     df = df.sort_values(by="CreatedOn", ascending=True)
 
@@ -133,23 +134,36 @@ for idx, file in enumerate(archivos, start=1):
     ]
     pivot = pivot.reindex(columns=orden_intervalos, fill_value=0)
     pivot["Total"] = pivot.sum(axis=1)
-    pivot = pivot.sort_index(ascending=True)  # 🔹 Asegurar orden cronológico
+    pivot = pivot.sort_index(ascending=True)  # asegurar orden cronológico
 
     # === RESUMEN POR DETALLES ===
     resumen_detalles = df["DETALLES"].value_counts().reset_index()
     resumen_detalles.columns = ["DETALLES", "Cantidad"]
 
+    # === TOP 18 MSISDN ===
+    top_msisdn = df["MSISDN"].value_counts().head(18).reset_index()
+    top_msisdn.columns = ["MSISDN", "Cantidad"]
+
     # === EXPORTAR A EXCEL ===
     pasos_totales = 5
     paso_actual = 0
 
-    # 1) Exportar datos
+    # 1) Exportar datos (Logs + Resumen + Detalles + Top MSISDN)
     with pd.ExcelWriter(output_file, engine="openpyxl",
                         date_format="DD/MM/YYYY HH:MM:SS",
                         datetime_format="DD/MM/YYYY HH:MM:SS") as writer:
         df.to_excel(writer, sheet_name="Logs", index=False)
+
+        # Pivot (Resumen)
         pivot.to_excel(writer, sheet_name="Resumen", startrow=0, index=True)
-        resumen_detalles.to_excel(writer, sheet_name="Resumen", startrow=pivot.shape[0] + 4, index=False)
+
+        # Resumen de DETALLES (encabezado en la fila pivot.shape[0] + 5)
+        start_row_detalles = pivot.shape[0] + 4
+        resumen_detalles.to_excel(writer, sheet_name="Resumen", startrow=start_row_detalles, index=False)
+
+        # Top MSISDN al lado (columna D, startcol=3 -> columna D)
+        top_msisdn.to_excel(writer, sheet_name="Resumen", startrow=start_row_detalles, startcol=3, index=False)
+
     paso_actual += 1
     mostrar_progreso(paso_actual, pasos_totales, file)
 
@@ -162,20 +176,28 @@ for idx, file in enumerate(archivos, start=1):
     paso_actual += 1
     mostrar_progreso(paso_actual, pasos_totales, file)
 
-    # 3) Formato Resumen
+    # 3) Formato Resumen (encabezados pivot)
     ws_resumen = wb["Resumen"]
     for cell in ws_resumen[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
 
-    # 👉 Justificar columna A (Fecha) un poco a la izquierda
+    # 👉 Justificar columna A (Fecha) un poco a la izquierda — aquí está el ajuste que pediste
     for cell in ws_resumen["A"]:
         cell.alignment = Alignment(horizontal="left")
 
+    # Estilo para encabezados de Resumen DETALLES y Top MSISDN (misma fila)
+    encabezado_detalles_row = pivot.shape[0] + 5  # fila Excel donde quedaron los encabezados de resumen_detalles
+    for cell in ws_resumen[encabezado_detalles_row]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+
+    # También aplicar estilo al encabezado del top_msisdn (está en la misma fila, columnas D y E)
+    # (ya cubierto por el bucle anterior al colorear toda la fila)
     paso_actual += 1
     mostrar_progreso(paso_actual, pasos_totales, file)
 
-    # 4) Insertar gráfica con colores
+    # 4) Insertar gráfica con colores (usamos el order de pivot.columns para asignar colores)
     max_row = pivot.shape[0] + 1
     max_col = pivot.shape[1] + 1
     chart = BarChart()
@@ -186,10 +208,10 @@ for idx, file in enumerate(archivos, start=1):
     chart.title = "Distribución por Intervalos (diario)"
     chart.y_axis.title = "Cantidad"
     chart.x_axis.title = "Fecha"
-    chart.width = 34   # 🔹 Nuevo tamaño ancho
-    chart.height = 17  # 🔹 Nuevo tamaño alto
+    chart.width = 34   # Nuevo tamaño ancho (cm aprox)
+    chart.height = 17  # Nuevo tamaño alto (cm aprox)
 
-    # Colores personalizados
+    # Colores personalizados (hex sin '#')
     colores_intervalos = {
         "menos de 10 minutos": "00B050",   # verde
         "de 11 a 20 minutos": "92D050",    # verde claro
@@ -200,14 +222,18 @@ for idx, file in enumerate(archivos, start=1):
         "Total": "808080"                  # gris
     }
 
-    for serie in chart.series:
-        nombre = serie.tx.get_text()
-        if nombre in colores_intervalos:
-            color = colores_intervalos[nombre]
-            for pt in serie.points:
-                dp = DataPoint()
-                dp.graphicalProperties.solidFill = color
-                pt.dPt = dp
+    # Asignar colores por posición (evita usar serie.tx.get_text())
+    series_names = list(pivot.columns)  # orden exacto de las columnas del pivot
+    for i, serie in enumerate(chart.series):
+        if i < len(series_names):
+            nombre_serie = series_names[i]
+            color = colores_intervalos.get(nombre_serie)
+            if color:
+                # aplicar color a todos los puntos de la serie
+                for pt in serie.points:
+                    dp = DataPoint()
+                    dp.graphicalProperties.solidFill = color
+                    pt.dPt = dp
 
     ws_resumen.add_chart(chart, f"I2")
     paso_actual += 1
