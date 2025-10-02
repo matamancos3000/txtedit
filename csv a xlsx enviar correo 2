@@ -151,7 +151,7 @@ def procesar_dataframe(df):
 
 def generar_resumenes(df):
     """Genera todos los resúmenes necesarios"""
-    # Resumen por día + intervalo
+    # Resumen por día + intervalo (pivot table)
     pivot = pd.pivot_table(
         df,
         index="Fecha",
@@ -200,6 +200,50 @@ def aplicar_formato_excel(wb, pivot):
     ws_resumen.column_dimensions["A"].width = 18
     
     return ws_resumen, pivot.shape
+
+def aplicar_formato_tablas_resumen(ws_resumen, pivot_shape, forma_detalles, forma_msisdn):
+    """Aplica formato a las tablas de DETALLES y MSISDN en el resumen"""
+    fila_inicio = pivot_shape[0] + 4
+    ancho_detalles = forma_detalles[1]  # número de columnas de detalles
+    
+    # Formato para encabezados (fondo rojo, letras blancas)
+    header_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    
+    # 🔹 Formatear tabla de DETALLES (izquierda)
+    for col in range(1, ancho_detalles + 1):  # Columnas A, B, etc.
+        cell = ws_resumen.cell(row=fila_inicio, column=col)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = header_alignment
+    
+    # 🔹 Formatear tabla de MSISDN (derecha, con 2 columnas de separación)
+    col_inicio_msisdn = ancho_detalles + 3  # +2 por las columnas de datos +1 de separación
+    for col in range(col_inicio_msisdn, col_inicio_msisdn + 2):  # MSISDN y Cantidad
+        cell = ws_resumen.cell(row=fila_inicio, column=col)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = header_alignment
+    
+    # Ajustar anchos de columnas para mejor visualización
+    ws_resumen.column_dimensions['A'].width = 18  # Fecha del pivot
+    ws_resumen.column_dimensions['B'].width = 12  # Primera columna del pivot
+    
+    # Para la tabla de DETALLES
+    ws_resumen.column_dimensions['A'].width = 40  # Columna A de detalles (DETALLES)
+    ws_resumen.column_dimensions['B'].width = 12  # Columna B de detalles (Cantidad)
+    
+    # Para la tabla de MSISDN (saltando 2 columnas de separación)
+    letra_col_msisdn = chr(64 + col_inicio_msisdn)
+    letra_col_cantidad = chr(64 + col_inicio_msisdn + 1)
+    
+    ws_resumen.column_dimensions[letra_col_msisdn].width = 20    # Columna MSISDN
+    ws_resumen.column_dimensions[letra_col_cantidad].width = 12  # Columna Cantidad MSISDN
+    
+    # Agregar títulos a las tablas
+    ws_resumen.cell(row=fila_inicio-1, column=1, value="DETALLES - RESUMEN").font = Font(bold=True, size=12)
+    ws_resumen.cell(row=fila_inicio-1, column=col_inicio_msisdn, value="TOP MSISDN").font = Font(bold=True, size=12)
 
 def crear_grafico(ws_resumen, pivot_shape):
     """Crea el gráfico combinado de barras y líneas"""
@@ -304,14 +348,24 @@ def procesar_archivo(archivo, idx, total):
         paso_actual += 1
         mostrar_progreso(paso_actual, PASOS_TOTALES, archivo, "Generando resumen...")
         
+        # 📊 NUEVA POSICIÓN: DETALLES a la izquierda, MSISDN a la derecha
+        # Calcular posición después del pivot
+        fila_inicio = pivot.shape[0] + 4
+        
+        # Escribir tabla de DETALLES (izquierda)
         resumen_detalles.to_excel(writer, sheet_name="Resumen", 
-                                startrow=pivot.shape[0] + 4, index=False)
+                                startrow=fila_inicio, startcol=0, index=False)
+        
+        # Escribir tabla de MSISDN (derecha) - con 2 columnas de separación
         top_msisdn.to_excel(writer, sheet_name="Resumen", 
-                          startrow=pivot.shape[0] + resumen_detalles.shape[0] + 8, index=False)
+                          startrow=fila_inicio, startcol=resumen_detalles.shape[1] + 2, index=False)
     
     # Aplicar formato y gráficos
     wb = load_workbook(output_path)
     ws_resumen, pivot_shape = aplicar_formato_excel(wb, pivot)
+    
+    # Aplicar formato a las nuevas tablas
+    aplicar_formato_tablas_resumen(ws_resumen, pivot_shape, resumen_detalles.shape, top_msisdn.shape)
     
     chart = crear_grafico(ws_resumen, pivot_shape)
     ws_resumen.add_chart(chart, "I2")
