@@ -13,7 +13,7 @@ input_folder = r"C:\Logs-Reporttoken"
 output_folder = r"C:\Logs-Reporttoken\Procesados"
 os.makedirs(output_folder, exist_ok=True)
 
-ENVIAR_CORREO = True  # <<< Cambia a False si NO quieres enviar correo
+ENVIAR_CORREO = False  # <<< Cambia a False si NO quieres enviar correo
 
 # === FUNCIONES AUXILIARES ===
 def parse_fecha_trabajo(valor):
