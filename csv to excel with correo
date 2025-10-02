@@ -3,8 +3,9 @@ import pandas as pd
 import re
 from datetime import datetime, timedelta
 from openpyxl import load_workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.chart import BarChart, Reference
+from openpyxl.chart.series import DataPoint
 from tresenviarcorreo import generar_correo, seleccionar_confidencialidad_y_enviar
 
 # === CONFIGURACIÓN ===
@@ -112,7 +113,7 @@ for idx, file in enumerate(archivos, start=1):
     # DETALLES vacío → Error de sistema
     df["DETALLES"] = df["DETALLES"].apply(limpiar_detalles)
 
-    # ORDENAR LOGS POR CreatedOn (fecha y hora reales)
+    # ORDENAR LOGS POR CreatedOn
     df["Fecha"] = df["CreatedOn"].dt.date
     df = df.sort_values(by="CreatedOn", ascending=True)
 
@@ -166,10 +167,15 @@ for idx, file in enumerate(archivos, start=1):
     for cell in ws_resumen[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+
+    # 👉 Justificar columna A (Fecha) un poco a la izquierda
+    for cell in ws_resumen["A"]:
+        cell.alignment = Alignment(horizontal="left")
+
     paso_actual += 1
     mostrar_progreso(paso_actual, pasos_totales, file)
 
-    # 4) Insertar gráfica
+    # 4) Insertar gráfica con colores
     max_row = pivot.shape[0] + 1
     max_col = pivot.shape[1] + 1
     chart = BarChart()
@@ -182,6 +188,27 @@ for idx, file in enumerate(archivos, start=1):
     chart.x_axis.title = "Fecha"
     chart.width = 34   # 🔹 Nuevo tamaño ancho
     chart.height = 17  # 🔹 Nuevo tamaño alto
+
+    # Colores personalizados
+    colores_intervalos = {
+        "menos de 10 minutos": "00B050",   # verde
+        "de 11 a 20 minutos": "92D050",    # verde claro
+        "de 21 a 30 minutos": "FFFF00",    # amarillo
+        "de 30 a 60 minutos": "ED7D31",    # naranja
+        "más de 60 minutos": "FF0000",     # rojo
+        "Horario bot inactivo": "000000",  # negro
+        "Total": "808080"                  # gris
+    }
+
+    for serie in chart.series:
+        nombre = serie.tx.get_text()
+        if nombre in colores_intervalos:
+            color = colores_intervalos[nombre]
+            for pt in serie.points:
+                dp = DataPoint()
+                dp.graphicalProperties.solidFill = color
+                pt.dPt = dp
+
     ws_resumen.add_chart(chart, f"I2")
     paso_actual += 1
     mostrar_progreso(paso_actual, pasos_totales, file)
