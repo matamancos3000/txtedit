@@ -1,0 +1,51 @@
+import time
+from collections import deque
+from colorama import Fore, Style, init
+
+# Inicializar colorama
+init()
+
+# Ruta del archivo .log
+file_path = 'ruta/del/archivo.log'
+
+# Número de líneas que queremos mostrar al inicio
+last_n_lines = 10
+
+# Colores en orden arcoíris + extra
+colors = [
+    Fore.RED,             # Rojo
+    Fore.LIGHTRED_EX,     # Naranja (simulado)
+    Fore.YELLOW,          # Amarillo
+    Fore.GREEN,           # Verde
+    Fore.BLUE,            # Azul
+    Fore.MAGENTA,         # Morado
+    Fore.LIGHTMAGENTA_EX, # Rosa
+    Fore.WHITE            # Blanco
+]
+
+color_index = 0  # Índice para el color actual
+line_count = 0   # Contador de líneas para controlar cada 2
+
+# Lee las últimas `last_n_lines` líneas del archivo
+with open(file_path, 'r') as file:
+    last_lines = deque(file, maxlen=last_n_lines)
+
+# Mostrar las últimas `last_n_lines` líneas al inicio
+for line in last_lines:
+    print(colors[color_index] + line.strip() + Style.RESET_ALL)
+    line_count += 1
+    if line_count % 2 == 0:  # cambiar de color cada 2 líneas
+        color_index = (color_index + 1) % len(colors)
+
+# Abrir el archivo en modo "seguir"
+with open(file_path, 'r') as file:
+    file.seek(0, 2)
+    while True:
+        line = file.readline()
+        if not line:
+            time.sleep(0.1)
+            continue
+        print(colors[color_index] + line.strip() + Style.RESET_ALL)
+        line_count += 1
+        if line_count % 2 == 0:  # cambiar de color cada 2 líneas
+            color_index = (color_index + 1) % len(colors)
