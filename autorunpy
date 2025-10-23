@@ -1,0 +1,38 @@
+import time
+import os
+from datetime import datetime
+
+# 🕒 CONFIGURACIÓN
+target_hour = 22     # 10 PM en formato 24h
+target_minute = 29   # 29 minutos
+wait_seconds = 10    # Espera entre scripts
+
+# 🧩 Rutas de tus scripts
+script1 = r"C:\ruta\a\Python 1.py"
+script2 = r"C:\ruta\a\Python 2.py"
+
+print("💫 Iniciando programa diario de ejecución automática...")
+print(f"🕒 Los scripts se ejecutarán cada día a las {target_hour}:{target_minute:02d}.\n")
+
+while True:
+    now = datetime.now()
+
+    # Comprueba si es la hora exacta
+    if now.hour == target_hour and now.minute == target_minute:
+        print("🐍 Ejecutando Python 1.py...")
+        os.system(f'python "{script1}"')
+
+        print(f"⏳ Esperando {wait_seconds} segundos antes del siguiente script...")
+        time.sleep(wait_seconds)
+
+        print("🚀 Ejecutando Python 2.py...")
+        os.system(f'python "{script2}"')
+
+        print("✅ Tareas completadas con éxito.")
+        print("🌙 Esperando hasta la próxima ejecución diaria...\n")
+
+        # Espera un poco más de un minuto para evitar múltiples ejecuciones en el mismo minuto
+        time.sleep(65)
+
+    # Espera 10 segundos antes de volver a comprobar la hora
+    time.sleep(10)
