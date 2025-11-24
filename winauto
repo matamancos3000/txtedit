@@ -21,21 +21,26 @@ print(f"Revisión cada {CHECK_INTERVAL/60} minutos\n")
 
 while True:
     try:
-        # Buscar ventana por coincidencia del título usando regex
         window = Desktop(backend="uia").window(title_re=WINDOW_TEXT)
 
         if window.exists():
             state = window.get_show_state()  # 1=normal, 2=minimizada, 3=maximizada
 
-            if state == 2:  # Ventana minimizada
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            if state == 2:  # Minimizada
                 print(f"[{timestamp}] ➡ Ventana minimizada, restaurando...")
 
                 window.restore()
-                window.set_focus()
 
-            else:
-                print("✔ Ventana encontrada y activa/no minimizada.")
+            # Poner siempre la ventana al frente
+            try:
+                window.set_focus()        # Dar enfoque
+                window.set_foreground()   # Forzar al frente
+            except:
+                pass
+
+            print(f"[{timestamp}] ✔ Ventana restaurada y traída al frente.")
 
         else:
             print("❌ No se encontró la ventana.")
