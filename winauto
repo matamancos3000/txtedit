@@ -3,21 +3,27 @@ import time
 from datetime import datetime
 
 # ---------- CONFIG ----------
-SEARCH_TEXT = "MX CWX Desktop (2)"   # texto exacto que queremos encontrar (puedes cambiar)
-DELAY_BEFORE_MINIMIZE = 10           # segundos
-DELAY_BEFORE_RESTORE = 10            # segundos
-CYCLE_INTERVAL = 30                  # segundos entre ciclos (poner 21600 para 6 horas)
+SEARCH_TEXT = "MX CWX Desktop (2)"    
+DELAY_BEFORE_MINIMIZE = 10            # segundos
+DELAY_BEFORE_RESTORE = 10             # segundos
+CYCLE_INTERVAL = 30                   # segundos entre ciclos (21600 = 6 horas)
 # -----------------------------
 
 def now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def sec_to_min_str(sec):
+    mins = sec / 60
+    if mins == 1:
+        return f"{sec}s (1 minuto)"
+    else:
+        return f"{sec}s ({mins:.1f} minutos)"
 
 print(f"[{now()}] Iniciando monitor. Buscando ventanas que contengan: '{SEARCH_TEXT}'\n")
 
 while True:
     try:
         found = False
-        # Listar todas las ventanas detectadas por win32
         windows = Desktop(backend="win32").windows()
 
         for w in windows:
@@ -25,39 +31,46 @@ while True:
                 title = w.window_text()
             except:
                 title = ""
-
+            
             if SEARCH_TEXT in title:
                 found = True
                 print(f"[{now()}] → Ventana encontrada: '{title}'")
 
-                # Minimizar
+                # Espera antes de minimizar
+                print(f"[{now()}]   - Esperando {sec_to_min_str(DELAY_BEFORE_MINIMIZE)} antes de minimizar...")
+                time.sleep(DELAY_BEFORE_MINIMIZE)
+
+                # Minimizar SOLO si es posible
                 try:
-                    print(f"[{now()}]   - Esperando {DELAY_BEFORE_MINIMIZE}s antes de minimizar...")
-                    time.sleep(DELAY_BEFORE_MINIMIZE)
-                    print(f"[{now()}]   - Minimizando...")
-                    w.minimize()
+                    if w.is_minimized() is False:        # no minimizar si ya está minimizada
+                        print(f"[{now()}]   - Minimizando ventana...")
+                        w.minimize()
+                    else:
+                        print(f"[{now()}]   - La ventana ya estaba minimizada, no se minimiza.")
                 except Exception as e_min:
-                    print(f"[{now()}]   - Error al minimizar: {e_min}")
+                    print(f"[{now()}]   - No se pudo minimizar (probablemente ventana no minimizable).")
 
-                # Esperar antes de restaurar
+                # Espera antes de restaurar
+                print(f"[{now()}]   - Esperando {sec_to_min_str(DELAY_BEFORE_RESTORE)} antes de restaurar...")
+                time.sleep(DELAY_BEFORE_RESTORE)
+
+                # Restaurar SOLO si es posible
                 try:
-                    print(f"[{now()}]   - Esperando {DELAY_BEFORE_RESTORE}s antes de restaurar...")
-                    time.sleep(DELAY_BEFORE_RESTORE)
-                    print(f"[{now()}]   - Restaurando...")
-                    w.restore()
-                    print(f"[{now()}]   - Hecho para '{title}'\n")
-                except Exception as e_res:
-                    print(f"[{now()}]   - Error al restaurar: {e_res}\n")
+                    if w.is_minimized():
+                        print(f"[{now()}]   - Restaurando ventana...")
+                        w.restore()
+                    else:
+                        print(f"[{now()}]   - La ventana no estaba minimizada, no se restaura.")
+                except Exception:
+                    print(f"[{now()}]   - No se pudo restaurar (quizá no es restaurable).")
 
-                # Si hay varias ventanas con el mismo texto y quieres procesarlas todas,
-                # no pongas `break`. Si solo quieres la primera, descomenta la siguiente línea:
-                # break
+                print(f"[{now()}]   ✔ Ciclo completado para '{title}'\n")
 
         if not found:
-            print(f"[{now()}] ❌ No se encontró ninguna ventana que contenga '{SEARCH_TEXT}'")
+            print(f"[{now()}] ℹ No se encontró ninguna ventana que contenga '{SEARCH_TEXT}'. (seguiré buscando)")
 
     except Exception as e:
-        print(f"[{now()}] ⚠ Error general en el ciclo: {e}")
+        print(f"[{now()}] ⚠ Error inesperado: {e}")
 
-    print(f"[{now()}] ⏳ Esperando {CYCLE_INTERVAL} segundos hasta el próximo ciclo...\n")
+    print(f"[{now()}] ⏳ Esperando {sec_to_min_str(CYCLE_INTERVAL)} para el próximo ciclo...\n")
     time.sleep(CYCLE_INTERVAL)
