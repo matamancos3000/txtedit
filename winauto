@@ -7,7 +7,7 @@ from datetime import datetime
 # ==============================
 
 # Texto parcial o regex para buscar ventana
-WINDOW_TEXT = ".*excel.*"
+WINDOW_TEXT = ".*CAM30.*"   # Buscará cualquier ventana que contenga CAM30
 
 # Tiempo entre revisiones (en segundos)
 CHECK_INTERVAL = 10 * 60   # 10 minutos
@@ -21,12 +21,13 @@ print(f"Revisión cada {CHECK_INTERVAL/60} minutos\n")
 
 while True:
     try:
+        # Buscar ventana por coincidencia del título usando regex
         window = Desktop(backend="uia").window(title_re=WINDOW_TEXT)
 
         if window.exists():
-            state = window.get_show_state()
+            state = window.get_show_state()  # 1=normal, 2=minimizada, 3=maximizada
 
-            if state == 2:  # Minimizada
+            if state == 2:  # Ventana minimizada
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 print(f"[{timestamp}] ➡ Ventana minimizada, restaurando...")
 
