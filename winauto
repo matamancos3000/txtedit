@@ -1,16 +1,63 @@
 from pywinauto import Desktop
+import time
+from datetime import datetime
 
-try:
-    dlg = Desktop(backend="win32").window(title_re=".*MX CWX Desktop.*")
-    print("Ventana encontrada:", dlg.window_text())
+# ---------- CONFIG ----------
+SEARCH_TEXT = "MX CWX Desktop (2)"   # texto exacto que queremos encontrar (puedes cambiar)
+DELAY_BEFORE_MINIMIZE = 10           # segundos
+DELAY_BEFORE_RESTORE = 10            # segundos
+CYCLE_INTERVAL = 30                  # segundos entre ciclos (poner 21600 para 6 horas)
+# -----------------------------
 
-    print("Minimizando ventana...")
-    dlg.minimize()
+def now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    print("Restaurando ventana...")
-    dlg.restore()
+print(f"[{now()}] Iniciando monitor. Buscando ventanas que contengan: '{SEARCH_TEXT}'\n")
 
-    print("Listo 😊")
+while True:
+    try:
+        found = False
+        # Listar todas las ventanas detectadas por win32
+        windows = Desktop(backend="win32").windows()
 
-except Exception as e:
-    print("Error:", e)
+        for w in windows:
+            try:
+                title = w.window_text()
+            except:
+                title = ""
+
+            if SEARCH_TEXT in title:
+                found = True
+                print(f"[{now()}] → Ventana encontrada: '{title}'")
+
+                # Minimizar
+                try:
+                    print(f"[{now()}]   - Esperando {DELAY_BEFORE_MINIMIZE}s antes de minimizar...")
+                    time.sleep(DELAY_BEFORE_MINIMIZE)
+                    print(f"[{now()}]   - Minimizando...")
+                    w.minimize()
+                except Exception as e_min:
+                    print(f"[{now()}]   - Error al minimizar: {e_min}")
+
+                # Esperar antes de restaurar
+                try:
+                    print(f"[{now()}]   - Esperando {DELAY_BEFORE_RESTORE}s antes de restaurar...")
+                    time.sleep(DELAY_BEFORE_RESTORE)
+                    print(f"[{now()}]   - Restaurando...")
+                    w.restore()
+                    print(f"[{now()}]   - Hecho para '{title}'\n")
+                except Exception as e_res:
+                    print(f"[{now()}]   - Error al restaurar: {e_res}\n")
+
+                # Si hay varias ventanas con el mismo texto y quieres procesarlas todas,
+                # no pongas `break`. Si solo quieres la primera, descomenta la siguiente línea:
+                # break
+
+        if not found:
+            print(f"[{now()}] ❌ No se encontró ninguna ventana que contenga '{SEARCH_TEXT}'")
+
+    except Exception as e:
+        print(f"[{now()}] ⚠ Error general en el ciclo: {e}")
+
+    print(f"[{now()}] ⏳ Esperando {CYCLE_INTERVAL} segundos hasta el próximo ciclo...\n")
+    time.sleep(CYCLE_INTERVAL)
