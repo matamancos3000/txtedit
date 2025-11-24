@@ -1,15 +1,16 @@
 from pywinauto import Desktop
 
 try:
-    dlg = Desktop(backend="win32").window(title_re=".*MX CWX.*")
+    dlg = Desktop(backend="win32").window(title_re=".*MX CWX Desktop.*")
     print("Ventana encontrada:", dlg.window_text())
 
-    print("Intentando restaurar...")
-    dlg.restore()
-
-    print("Intentando minimizar...")
+    print("Minimizando ventana...")
     dlg.minimize()
 
-    print("Hecho.")
+    print("Restaurando ventana...")
+    dlg.restore()
+
+    print("Listo 😊")
+
 except Exception as e:
     print("Error:", e)
