@@ -1,0 +1,46 @@
+from pywinauto import Desktop
+import time
+from datetime import datetime
+
+# ==============================
+# CONFIGURACIÓN
+# ==============================
+
+# Texto parcial o regex para buscar ventana
+WINDOW_TEXT = ".*excel.*"
+
+# Tiempo entre revisiones (en segundos)
+CHECK_INTERVAL = 10 * 60   # 10 minutos
+
+# ==============================
+# PROGRAMA
+# ==============================
+
+print(f"Monitoreando ventana que coincida con: '{WINDOW_TEXT}'")
+print(f"Revisión cada {CHECK_INTERVAL/60} minutos\n")
+
+while True:
+    try:
+        window = Desktop(backend="uia").window(title_re=WINDOW_TEXT)
+
+        if window.exists():
+            state = window.get_show_state()
+
+            if state == 2:  # Minimizada
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print(f"[{timestamp}] ➡ Ventana minimizada, restaurando...")
+
+                window.restore()
+                window.set_focus()
+
+            else:
+                print("✔ Ventana encontrada y activa/no minimizada.")
+
+        else:
+            print("❌ No se encontró la ventana.")
+
+    except Exception as e:
+        timestamp_err = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{timestamp_err}] ⚠ Error:", e)
+
+    time.sleep(CHECK_INTERVAL)
