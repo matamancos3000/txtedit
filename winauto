@@ -1,54 +1,13 @@
-from pywinauto.application import Application
-import time
-from datetime import datetime
+from pywinauto import Desktop
 
-# ==============================
-# CONFIGURACIÓN
-# ==============================
+print("Listando ventanas detectadas por backend=win32...\n")
 
-WINDOW_TITLE = "CAM30"         # Nombre EXACTO de la ventana
-DELAY_BEFORE_MINIMIZE = 10     # Segundos antes de minimizar
-DELAY_BEFORE_RESTORE = 10      # Segundos antes de restaurar
-CYCLE_INTERVAL = 30            # Cada cuánto repetir el ciclo (segundos) → aquí puedes poner 6 horas = 21600
+windows = Desktop(backend="win32").windows()
 
-
-# ==============================
-# PROGRAMA
-# ==============================
-
-print(f"Buscando ventana '{WINDOW_TITLE}' cada ciclo de {CYCLE_INTERVAL} segundos.\n")
-
-while True:
+for w in windows:
     try:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"[{timestamp}] Intentando localizar la ventana...")
-
-        # Intentar conectar
-        app = Application(backend="uia").connect(title=WINDOW_TITLE)
-        dlg = app.window(title=WINDOW_TITLE)
-
-        print(f"✔ Ventana encontrada: '{WINDOW_TITLE}'")
-
-        # Esperar antes de minimizar
-        print(f"Esperando {DELAY_BEFORE_MINIMIZE} segundos antes de minimizar...")
-        time.sleep(DELAY_BEFORE_MINIMIZE)
-
-        print("➖ Minimizando ventana...")
-        dlg.minimize()
-
-        # Esperar antes de restaurar
-        print(f"Esperando {DELAY_BEFORE_RESTORE} segundos antes de restaurar...")
-        time.sleep(DELAY_BEFORE_RESTORE)
-
-        print("🔄 Restaurando ventana (sin traerla al frente)...")
-        dlg.restore()
-
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"[{timestamp}] Ciclo completado.\n")
-
-    except Exception as e:
-        print(f"❌ No se pudo acceder a la ventana: {e}")
-
-    # Esperar siguiente ciclo
-    print(f"⏳ Esperando {CYCLE_INTERVAL} segundos para el próximo ciclo...\n")
-    time.sleep(CYCLE_INTERVAL)
+        title = w.window_text()
+        if title.strip() != "":
+            print("→", title)
+    except:
+        pass
