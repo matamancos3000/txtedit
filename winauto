@@ -1,13 +1,15 @@
 from pywinauto import Desktop
 
-print("Listando ventanas detectadas por backend=win32...\n")
+try:
+    dlg = Desktop(backend="win32").window(title_re=".*MX CWX.*")
+    print("Ventana encontrada:", dlg.window_text())
 
-windows = Desktop(backend="win32").windows()
+    print("Intentando restaurar...")
+    dlg.restore()
 
-for w in windows:
-    try:
-        title = w.window_text()
-        if title.strip() != "":
-            print("→", title)
-    except:
-        pass
+    print("Intentando minimizar...")
+    dlg.minimize()
+
+    print("Hecho.")
+except Exception as e:
+    print("Error:", e)
