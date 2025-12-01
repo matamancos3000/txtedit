@@ -1,0 +1,7 @@
+import os
+
+def cargar_html_local(nombre_archivo="HTML_CORREO.html"):
+    ruta = os.path.join(os.path.dirname(__file__), nombre_archivo)
+
+    with open(ruta, "r", encoding="utf-8") as f:
+        return f.read()
