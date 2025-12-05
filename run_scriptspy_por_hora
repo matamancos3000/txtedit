@@ -1,0 +1,40 @@
+import time
+import os
+from datetime import datetime
+
+# 🧩 CONFIGURACIÓN
+wait_between_scripts = 10   # segundos entre cada script
+wait_between_cycles = 3600  # 1 hora en segundos
+
+# 🧩 Rutas de tus scripts Python
+script1 = r"C:\ruta\a\Python 1.py"
+script2 = r"C:\ruta\a\Python 2.py"
+script3 = r"C:\ruta\a\Python 3.py"
+
+print("🔁 Iniciando ejecución automática cada 1 hora...\n")
+
+while True:
+    print("🕒 Nueva ejecución —", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    
+    # Script 1
+    print("\n🐍 Ejecutando Python 1.py...")
+    os.system(f'python "{script1}"')
+
+    print(f"⏳ Esperando {wait_between_scripts} segundos...\n")
+    time.sleep(wait_between_scripts)
+
+    # Script 2
+    print("🚀 Ejecutando Python 2.py...")
+    os.system(f'python "{script2}"')
+
+    print(f"⏳ Esperando {wait_between_scripts} segundos...\n")
+    time.sleep(wait_between_scripts)
+
+    # Script 3
+    print("🧩 Ejecutando Python 3.py...")
+    os.system(f'python "{script3}"')
+
+    print("\n✅ Ejecución completa de los 3 scripts.")
+    print("🌙 Esperando 1 hora para la siguiente ejecución...\n")
+
+    time.sleep(wait_between_cycles)
