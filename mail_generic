@@ -1,0 +1,441 @@
+"""
+enviar_correo_pywinauto.py
+Versión: 1.0
+Autor: Generado para Erick
+Descripción:
+    Envia correos usando COM (win32com) para crear el mensaje en Outlook y
+    fuerza el uso de pywinauto para seleccionar el nivel de confidencialidad
+    antes de enviar. Todo en un único archivo con configuración arriba.
+Requisitos:
+    pip install pywinauto pywin32
+Notas:
+    - Ajusta CONFIG más abajo según tus rutas, correos y preferencias.
+    - El script hace mail.Display() y luego pywinauto conecta a la ventana
+      recién abierta para cambiar la confidencialidad y pulsar "Enviar".
+"""
+
+import os
+import time
+import re
+import traceback
+from typing import List, Union, Tuple, Dict
+
+import win32com.client as win32
+from pywinauto import Application
+
+# ----------------------------
+# CONFIGURACIÓN GLOBAL (edítala)
+# ----------------------------
+CONFIG = {
+    # a) Correo de quien lo envia (se usa solo para firma; Outlook usará la cuenta por defecto)
+    "remitente": "erick.ramirez@noexternalmail.hsbc.com",
+
+    # b) Destinatarios (string o lista)
+    "destinatarios": ["erick.ramirez@noexternalmail.hsbc.com"],
+
+    # c) Copia (CC)
+    "cc": [],
+
+    # d) Copia oculta (BCC)
+    "cco": [],
+
+    # e) Asunto
+    "asunto": "Reporte mensual Cambio de contraseña y reporte de token UID 10507",
+
+    # f) Confidencialidad (uno de los niveles: Public, Internal, Restringed, Hight Restringed)
+    #     IMPORTANTE: usa exactamente los textos que aparecen en el menú de tu Outlook
+    "confidencialidad": "Restringed",
+
+    # g) Archivos adjuntos
+    "usar_adjuntos": True,
+    "adjuntos": [
+        # pon rutas absolutas a los archivos que quieras adjuntar
+        # Ejemplo: r"C:\Users\Erick\Documents\reporte.pdf"
+    ],
+
+    # h) HTML: usar local o generado
+    "usar_html_local": False,
+    "ruta_html_local": r"C:\Logs-Reporttoken\HTML_CORREO\HTML_CORREO.html",
+
+    "usar_html_generado": True,  # si True, se usa html_generico + CSS_TEMPLATE
+
+    # Si usar html generado, edita html_generico y CSS_TEMPLATE más abajo
+    "incluir_firma": True,  # incluye firma corporativa en el HTML (según datos más abajo)
+}
+
+# Firma (se inyecta si incluir_firma==True)
+FIRMA = {
+    "nombre": "Erick Alberto Ramírez Baez",
+    "puesto": "Process Automation Configurator | Analista Developer RPA CC",
+    "empresa": "HSBC México",
+    "direccion": "Av. Paseo de la Reforma #347, Cuauhtémoc, 06500, CDMX",
+    "email_interno": "erick.ramirez@noexternalmail.hsbc.com",
+}
+
+# ----------------------------
+# CSS y HTML genérico (edítalo)
+# ----------------------------
+CSS_TEMPLATE = """
+<style type="text/css">
+  body, table, td { font-family: Arial, Helvetica, sans-serif; color: #333333; }
+  .contenedor { max-width: 700px; margin: 0 auto; background: #ffffff; border: 1px solid #e6e6e6; }
+  .cabecera { background-color: #DB0011; color: white; padding: 18px; text-align: left; }
+  .contenido { padding: 18px; line-height: 1.5; }
+  .firma { padding: 12px 18px; background: #F5F5F5; font-size: 13px; color: #333333; }
+  .btn { display:inline-block; padding:10px 16px; text-decoration:none; border-radius:4px; font-weight:bold; }
+  @media only screen and (max-width:480px) {
+    .contenedor { width: 100% !important; }
+  }
+</style>
+"""
+
+HTML_GENERICO = """
+<div class="contenedor">
+  <div class="cabecera">
+    <h2>{titulo}</h2>
+  </div>
+  <div class="contenido">
+    {contenido_principal}
+  </div>
+  {firma_html}
+</div>
+"""
+
+# ----------------------------
+# Mapear etiquetas de confidencialidad a Sensitivity numeric (Outlook)
+# Outlook Sensitivity: 0=Normal, 1=Personal, 2=Private, 3=Confidential
+# Elegimos un mapeo lógico local — puedes modificar si necesitas otro comportamiento.
+# ----------------------------
+CONFID_MAP = {
+    "Public": 0,
+    "Internal": 1,            # lo tomamos parecido a "Personal" a falta de otra opción
+    "Restringed": 3,          # tu opción "Restringed" -> Confidential (3)
+    "Hight Restringed": 3,    # nivel alto -> también lo ponemos en 3 (Outlook limitado)
+}
+
+# ----------------------------
+# Funciones utilitarias
+# ----------------------------
+
+def _formatear_destinatarios(destinatarios: Union[str, List[str]]) -> str:
+    """Devuelve string listo para asignar a mail.To / CC / BCC (separa por '; ')."""
+    if not destinatarios:
+        return ""
+    if isinstance(destinatarios, str):
+        return destinatarios
+    # filtrar elementos inválidos
+    validos = [d.strip() for d in destinatarios if isinstance(d, str) and "@" in d]
+    return "; ".join(validos)
+
+
+def cargar_html_local(ruta: str) -> str:
+    """Lee un archivo HTML local y devuelve su contenido, o cadena vacía en error."""
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        print(f"❌ Error cargando HTML local '{ruta}': {e}")
+        return ""
+
+
+def construir_html(titulo: str, contenido_principal: str) -> str:
+    """Construye el HTML que se usará como cuerpo, según CONFIG."""
+    # Si usan HTML local, prioridad a eso
+    if CONFIG.get("usar_html_local") and os.path.exists(CONFIG.get("ruta_html_local", "")):
+        html = cargar_html_local(CONFIG["ruta_html_local"])
+        if html:
+            return html
+
+    # Si usan HTML generado
+    if CONFIG.get("usar_html_generado"):
+        firma_html = ""
+        if CONFIG.get("incluir_firma"):
+            firma_html = f"""
+            <div class="firma">
+                <strong>{FIRMA['nombre']}</strong><br>
+                {FIRMA['puesto']}<br>
+                {FIRMA['empresa']}<br>
+                {FIRMA['direccion']}<br>
+                <strong>E-mail:</strong> <a href="mailto:{FIRMA['email_interno']}">{FIRMA['email_interno']}</a>
+            </div>
+            """
+        plantilla = HTML_GENERICO.format(titulo=titulo, contenido_principal=contenido_principal, firma_html=firma_html)
+        return CSS_TEMPLATE + plantilla
+
+    # Fallback: cuerpo simple
+    return CSS_TEMPLATE + HTML_GENERICO.format(titulo=titulo, contenido_principal=contenido_principal, firma_html="")
+
+# ----------------------------
+# Outlook + Envío
+# ----------------------------
+
+def verificar_outlook_disponible() -> bool:
+    """Intenta crear instancia de Outlook para validar disponibilidad."""
+    try:
+        outlook = win32.Dispatch("Outlook.Application")
+        ns = outlook.GetNamespace("MAPI")
+        _ = ns.Folders  # acceso simple para validar
+        return True
+    except Exception as e:
+        print(f"❌ Outlook no disponible: {e}")
+        return False
+
+
+def enviar_correo_via_outlook(
+    destinatarios: Union[str, List[str]],
+    asunto: str,
+    cuerpo_html: str,
+    archivos_adjuntos: List[str],
+    enviar_automaticamente: bool = False,
+    cc: Union[str, List[str]] = None,
+    bcc: Union[str, List[str]] = None,
+    sensibilidad_nombre: str = "Restringed"
+) -> Tuple[bool, Union[str, None]]:
+    """
+    Crea el correo con win32com y hace .Display() para abrir ventana de inspector.
+    Luego retornará True/None en caso de éxito (la ventana queda abierta).
+    NOTA: la obligación de cambiar la confidencialidad y pulsar ENVIAR la hace pywinauto.
+    """
+    try:
+        outlook = win32.Dispatch("Outlook.Application")
+        mail = outlook.CreateItem(0)  # 0 = olMailItem
+
+        mail.To = _formatear_destinatarios(destinatarios)
+        if cc:
+            mail.CC = _formatear_destinatarios(cc)
+        if bcc:
+            mail.BCC = _formatear_destinatarios(bcc)
+
+        mail.Subject = asunto
+        # Forzar HTML body
+        mail.HTMLBody = cuerpo_html
+
+        # Adjuntos
+        if CONFIG.get("usar_adjuntos") and archivos_adjuntos:
+            for ruta in archivos_adjuntos:
+                if ruta and os.path.exists(ruta):
+                    try:
+                        mail.Attachments.Add(os.path.abspath(ruta))
+                    except Exception as e:
+                        print(f"⚠️ No se pudo adjuntar {ruta}: {e}")
+                else:
+                    print(f"⚠️ Adjunto no encontrado (omitido): {ruta}")
+
+        # Ajustar Sensitivity según mapa (esto se aplica al propio objeto Mail; pywinauto además seleccionará el menú)
+        sens_value = CONFID_MAP.get(sensibilidad_nombre, 3)
+        try:
+            mail.Sensitivity = int(sens_value)
+        except Exception:
+            mail.Sensitivity = 3
+
+        # Mostrar la ventana para que pywinauto la controle
+        mail.Display()
+        # Dejar una pequeña pausa para que la ventana aparezca y se estabilice
+        time.sleep(1.2)
+
+        # Intentamos devolver información clave para que pywinauto busque la ventana: subject
+        return True, None
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"❌ Error creando/mostrando correo en Outlook: {e}\n{tb}")
+        return False, str(e)
+
+
+# ----------------------------
+# pywinauto: seleccionar confidencialidad y enviar
+# ----------------------------
+def seleccionar_confidencialidad_y_enviar(asunto: str, nivel_confid: str, esperar_segundos: float = 1.0) -> bool:
+    """
+    Conecta con la ventana del mensaje de Outlook que tiene 'asunto' en su título,
+    busca el control de confidencialidad (soporta 'Confidentiality' y 'Confidencialidad'),
+    selecciona la opción 'nivel_confid' y pulsa 'Enviar'.
+    """
+    try:
+        # Construir regex seguro para buscar ventana por asunto
+        safe_subject = re.escape(asunto)
+        # Algunos clientes muestran "Asunto - Mensaje (HTML)" u otros sufijos; usamos regex con .*subject.*
+        title_re = f".*{safe_subject}.*"
+
+        app = Application(backend="uia")
+
+        # Intentos para que pywinauto encuentre la ventana (a veces tarda)
+        found = None
+        for attempt in range(8):
+            try:
+                app.connect(title_re=title_re)
+                found = app
+                break
+            except Exception:
+                time.sleep(0.5)
+
+        if not found:
+            # Intento alternativo: buscar ventanas de Outlook (Inspector) y filtrar por Subject control
+            try:
+                app = Application(backend="uia").connect(path="OUTLOOK.EXE")
+            except Exception:
+                print("❌ No se pudo conectar a la ventana de Outlook con pywinauto.")
+                return False
+
+        # Localizar la ventana (intentamos varios patrones)
+        try:
+            ventana = app.window(title_re=title_re)
+            ventana.set_focus()
+        except Exception:
+            # fallback: elegir la ventana activa de Outlook
+            try:
+                ventana = app.top_window()
+                ventana.set_focus()
+            except Exception:
+                print("❌ No se pudo ubicar la ventana del mensaje.")
+                return False
+
+        time.sleep(esperar_segundos)
+
+        # Posibles títulos del combo en diferentes idiomas/versions:
+        posibles_titulos_combo = ["Confidentiality", "Confidencialidad", "Sensitivity"]
+        combo = None
+        for t in posibles_titulos_combo:
+            try:
+                combo = ventana.child_window(title=t, control_type="ComboBox")
+                combo.wait("ready", timeout=1)
+                break
+            except Exception:
+                combo = None
+
+        if not combo:
+            # A veces el control no tiene título; buscar cualquier ComboBox visible
+            try:
+                combos = ventana.descendants(control_type="ComboBox")
+                if combos:
+                    combo = combos[0]
+            except Exception:
+                combo = None
+
+        if not combo:
+            print("⚠️ No se encontró ComboBox de confidencialidad. Intentando menú alternativo...")
+            # como fallback intentamos abrir la cinta o menú por teclado: Alt+P (puede variar)
+            try:
+                ventana.type_keys("%P")  # ALT+P (depende de la versión/localización)
+                time.sleep(0.5)
+            except Exception:
+                pass
+
+        # Hacer click en combo
+        if combo:
+            try:
+                combo.click_input()
+                time.sleep(0.4)
+            except Exception as e:
+                print(f"⚠️ No se pudo clickear el ComboBox directamente: {e}")
+
+        # Seleccionar la opción exacta (nivel_confid)
+        # Buscamos MenuItem con el texto exacto
+        opcion = None
+        try:
+            opcion = ventana.child_window(title=nivel_confid, control_type="MenuItem")
+            opcion.wait("enabled", timeout=2)
+            opcion.click_input()
+            time.sleep(0.4)
+            print(f"✔ Confidencialidad seleccionada: {nivel_confid}")
+        except Exception:
+            # fallback: buscar cualquier MenuItem que contenga el texto
+            try:
+                items = ventana.descendants(control_type="MenuItem")
+                for it in items:
+                    try:
+                        if nivel_confid.lower() in it.window_text().lower():
+                            it.click_input()
+                            opcion = it
+                            break
+                    except Exception:
+                        continue
+                if opcion:
+                    print(f"✔ Confidencialidad seleccionada por búsqueda parcial: {nivel_confid}")
+                else:
+                    print(f"⚠️ No se encontró la opción '{nivel_confid}' en los MenuItems.")
+            except Exception:
+                print("⚠️ No fue posible seleccionar la confidencialidad por fallback.")
+
+        time.sleep(0.6)
+
+        # Pulsar ENVIAR
+        boton_candidates = ["Enviar", "Send"]
+        boton_enviar = None
+        for btext in boton_candidates:
+            try:
+                boton_enviar = ventana.child_window(title=btext, control_type="Button")
+                boton_enviar.wait("enabled", timeout=1)
+                boton_enviar.click_input()
+                print("✔ Click en botón Enviar")
+                return True
+            except Exception:
+                boton_enviar = None
+
+        # Si no encontramos botón por título, intentar usar atajo Ctrl+Enter
+        try:
+            ventana.type_keys("^{{ENTER}}")  # Ctrl+Enter
+            print("✔ Envío intentando atajo Ctrl+Enter")
+            return True
+        except Exception as e:
+            print(f"❌ No se pudo enviar automáticamente: {e}")
+            return False
+
+    except Exception as e:
+        print(f"❌ Error en seleccionar_confidencialidad_y_enviar: {e}")
+        traceback.print_exc()
+        return False
+
+
+# ----------------------------
+# Flujo principal
+# ----------------------------
+def generar_y_enviar():
+    print("Iniciando proceso de envío...")
+
+    if not verificar_outlook_disponible():
+        print("❌ Outlook no disponible. Detener ejecución.")
+        return
+
+    # Contenido principal (puedes reemplazarlo por el HTML que desees)
+    contenido_principal = """
+    <p>Buen día equipo,</p>
+    <p>Adjunto los archivos generados por el proceso RPA.</p>
+    <p>Agradezco su atención, quedo al pendiente para cualquier duda.</p>
+    <p>Saludos 🤖</p>
+    """
+
+    cuerpo_html = construir_html(CONFIG["asunto"], contenido_principal)
+
+    # Enviar (display)
+    success, err = enviar_correo_via_outlook(
+        destinatarios=CONFIG["destinatarios"],
+        asunto=CONFIG["asunto"],
+        cuerpo_html=cuerpo_html,
+        archivos_adjuntos=CONFIG.get("adjuntos", []),
+        enviar_automaticamente=False,
+        cc=CONFIG.get("cc", []),
+        bcc=CONFIG.get("cco", []),
+        sensibilidad_nombre=CONFIG.get("confidencialidad", "Restringed")
+    )
+
+    if not success:
+        print(f"❌ Error al crear/mostrar el correo: {err}")
+        return
+
+    # Dar tiempo a que la ventana abra completamente
+    time.sleep(1.2)
+
+    # Forzamos pywinauto para seleccionar confidencialidad y enviar
+    nivel_conf = CONFIG.get("confidencialidad", "Restringed")
+    ok = seleccionar_confidencialidad_y_enviar(CONFIG["asunto"], nivel_conf, esperar_segundos=1.0)
+    if ok:
+        print("✔ Flujo completado (pywinauto ejecutó la selección y envío).")
+    else:
+        print("⚠️ El proceso terminó pero pywinauto no pudo completar la selección/envío. Revisa la ventana de Outlook abierta.")
+
+# ----------------------------
+# Entrada del script
+# ----------------------------
+if __name__ == "__main__":
+    generar_y_enviar()
