@@ -1,0 +1,51 @@
+@echo off
+echo ============================================
+echo   Reparador para usar py.exe como Python
+echo ============================================
+echo.
+
+:: 1. Backup del PATH actual del usuario
+echo Haciendo respaldo de PATH de usuario...
+reg query "HKCU\Environment" /v PATH > "%USERPROFILE%\PATH_backup_before_python_fix.txt" 2>nul
+echo Backup guardado en: %USERPROFILE%\PATH_backup_before_python_fix.txt
+echo.
+
+:: 2. Leer PATH actual
+for /f "tokens=2,*" %%A in ('reg query "HKCU\Environment" /v PATH 2^>nul ^| findstr PATH') do set CURRENT_PATH=%%B
+
+:: 3. Quitar WindowsApps del PATH (solo si está)
+set FIXED_PATH=%CURRENT_PATH%
+set REMOVE_PART=%LOCALAPPDATA%\Microsoft\WindowsApps
+
+echo Corrigiendo PATH...
+echo.
+
+echo PATH actual:
+echo %CURRENT_PATH%
+echo.
+
+echo Buscando y removiendo: %REMOVE_PART%
+echo.
+
+call set FIXED_PATH=%%FIXED_PATH:%REMOVE_PART%=%%
+call set FIXED_PATH=%%FIXED_PATH:;;=;%%
+
+:: 4. Guardar el PATH corregido
+reg add "HKCU\Environment" /v PATH /t REG_EXPAND_SZ /d "%FIXED_PATH%" /f >nul
+
+echo Nuevo PATH aplicado.
+echo.
+
+:: 5. Refrescar variables de entorno
+echo Actualizando entorno...
+setx PATH "%FIXED_PATH%" >nul
+echo.
+
+:: 6. Mostrar version final de py
+echo ============================================
+echo   Version detectada con py:
+echo ============================================
+py --version
+echo.
+echo Reparación completada.
+pause
