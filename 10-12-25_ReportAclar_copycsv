@@ -1,175 +1,153 @@
-import os
+#!/usr/bin/env python3
+"""
+Reporte de Logs Aclarabot y Aclarapp
+Genera combinación de logs Aclarabot (DEV, UAT, PROD) limitando a 12 columnas
+y procesa un archivo local de Aclarapp limitando a 13 columnas.
+
+Variables configurables al inicio del archivo para hacerlo dinámico.
+Muestra emojis en consola y crea carpetas si no existen.
+"""
+
+from pathlib import Path
 import pandas as pd
-from datetime import datetime
-import glob
-import shutil
+import datetime
+import os
 
-def crear_carpeta_si_no_existe(ruta):
-    """Crea una carpeta si no existe"""
-    if not os.path.exists(ruta):
-        os.makedirs(ruta)
-        print("📁 Carpeta creada:", ruta)
-    return ruta
+# ----------------------
+# CONFIGURACIÓN
+# ----------------------
 
-def procesar_archivos_aclarabot():
-    """Procesa los archivos de Aclarabot de los 3 entornos"""
-    print("\n" + "="*60)
-    print("🚀 PROCESANDO ARCHIVOS ACLARABOT")
-    print("="*60)
-    
-    # Obtener fecha actual
-    ahora = datetime.now()
-    año_actual = ahora.year
-    mes_actual = ahora.strftime("%m")
-    dia_actual = ahora.strftime("%d")
-    
-    # Definir rutas base
-    ruta_base = "../Carpeta/Aclarabot"
-    entornos = ["DEV", "UAT", "PROD"]
-    
-    # Crear carpeta de destino
-    carpeta_destino_base = "c:/Copia-reporte-Aclarabot"
-    crear_carpeta_si_no_existe(carpeta_destino_base)
-    
-    # Nombre del archivo final (ej: 10-Nov-Dec.csv)
-    nombre_archivo_final = f"{dia_actual}-{ahora.strftime('%b')}.csv"
-    ruta_final = os.path.join(carpeta_destino_base, nombre_archivo_final)
-    
-    # Lista para almacenar todos los DataFrames
-    datos_combinados = []
-    
-    for entorno in entornos:
-        print(f"\n🔍 Buscando archivo para entorno: {entorno}")
-        
-        # Construir la ruta del archivo
-        ruta_archivo = os.path.join(ruta_base, entorno, "Log", str(año_actual), mes_actual, "Log.csv")
-        
-        if os.path.exists(ruta_archivo):
-            print(f"   ✅ Archivo encontrado: {ruta_archivo}")
-            
-            try:
-                # Leer el archivo CSV (solo primeras 12 columnas)
-                df = pd.read_csv(ruta_archivo, usecols=range(12))
-                
-                # Agregar columna de entorno al principio
-                df.insert(0, 'ENTORNO', entorno)
-                
-                datos_combinados.append(df)
-                print(f"   📊 Filas procesadas: {len(df)}")
-                
-            except Exception as e:
-                print(f"   ❌ Error al procesar {entorno}: {e}")
-        else:
-            print(f"   ⚠️  Archivo no encontrado: {ruta_archivo}")
-    
-    if datos_combinados:
-        # Combinar todos los DataFrames
-        df_final = pd.concat(datos_combinados, ignore_index=True)
-        
-        # Guardar el archivo combinado
-        df_final.to_csv(ruta_final, index=False)
-        print(f"\n✨ ARCHIVO ACLARABOT GUARDADO EXITOSAMENTE")
-        print(f"   📍 Ruta: {ruta_final}")
-        print(f"   📈 Total de filas: {len(df_final)}")
-        print(f"   📊 Total de columnas: {len(df_final.columns)}")
-        
-        return ruta_final, df_final
+BASE_ACLARABOT = Path(r"C:/Carpeta/Aclarabot")  
+ACLARAPP_COPY_PATH = Path(r"C:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv")
+OUTPUT_BASE = Path(r"C:/Copia-reporte-Aclarabot")
+
+ENTORNOS = ["DEV", "UAT", "PROD"]
+
+# ahora el nombre puede ser Log.csv o log.csv
+ACLARABOT_FILENAMES = ["Log.csv", "log.csv"]
+
+ACLARABOT_MAX_COLS = 12
+ACLARAPP_MAX_COLS = 13
+GENERATE_LOGFILE = True
+
+# ----------------------
+# FUNCIONES
+# ----------------------
+
+def emoji(msg, em="🔷"):
+    print(f"{em} {msg}")
+
+def ensure_dir(path: Path):
+    if not path.exists():
+        path.mkdir(parents=True, exist_ok=True)
+        emoji(f"Carpeta creada: {path}", "📁")
     else:
-        print("\n❌ No se encontraron datos para procesar")
-        return None, None
+        emoji(f"Carpeta existente: {path}", "📂")
 
-def procesar_archivo_aclarapp():
-    """Procesa el archivo de Aclarapp"""
-    print("\n" + "="*60)
-    print("📱 PROCESANDO ARCHIVO ACLARAPP")
-    print("="*60)
-    
-    # Ruta del archivo de Aclarapp
-    ruta_aclarapp = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv"
-    
-    # Crear carpeta si no existe
-    carpeta_aclarapp = os.path.dirname(ruta_aclarapp)
-    crear_carpeta_si_no_existe(carpeta_aclarapp)
-    
-    if os.path.exists(ruta_aclarapp):
-        print(f"✅ Archivo encontrado: {ruta_aclarapp}")
-        
+
+def delete_old_csvs(base: Path):
+    """Elimina todos los CSV directamente dentro de OUTPUT_BASE (no subcarpetas)."""
+    emoji("Eliminando archivos CSV antiguos…", "🗑️")
+    count = 0
+    for f in base.glob("*.csv"):
         try:
-            # Leer el archivo CSV (solo primeras 13 columnas)
-            df_aclarapp = pd.read_csv(ruta_aclarapp, usecols=range(13))
-            
-            print(f"📊 Filas procesadas: {len(df_aclarapp)}")
-            print(f"📈 Columnas procesadas: {len(df_aclarapp.columns)}")
-            
-            # Mostrar primeras filas
-            print("\n👀 Vista previa de los datos:")
-            print(df_aclarapp.head())
-            
-            return df_aclarapp
-            
+            f.unlink()
+            count += 1
+            emoji(f"Eliminado: {f}", "❌")
         except Exception as e:
-            print(f"❌ Error al procesar archivo Aclarapp: {e}")
-            return None
-    else:
-        print(f"⚠️  Archivo no encontrado: {ruta_aclarapp}")
-        print("💡 Por favor, coloca el archivo en la ubicación especificada")
-        
-        # Crear archivo de ejemplo vacío
-        columnas = [f"Columna_{i+1}" for i in range(13)]
-        df_vacio = pd.DataFrame(columns=columnas)
-        df_vacio.to_csv(ruta_aclarapp, index=False)
-        print(f"📄 Se ha creado un archivo vacío en: {ruta_aclarapp}")
-        
+            emoji(f"No se pudo eliminar {f}: {e}", "⚠️")
+    emoji(f"Total de CSV eliminados: {count}", "✔️")
+
+
+def read_csv_limited(path: Path, max_cols: int, sep=None):
+    if not path.exists():
+        emoji(f"Archivo no encontrado: {path}", "⚠️")
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_csv(path, sep=sep, engine='python', dtype=str, keep_default_na=False)
+        if df.shape[1] > max_cols:
+            df = df.iloc[:, :max_cols].copy()
+        return df
+    except Exception:
+        try:
+            df = pd.read_csv(path, sep=",", engine='python', dtype=str, keep_default_na=False)
+            if df.shape[1] > max_cols:
+                df = df.iloc[:, :max_cols].copy()
+            return df
+        except Exception:
+            emoji(f"Fallo al leer archivo: {path}", "❌")
+            return pd.DataFrame()
+
+
+def find_aclarabot_file(path: Path):
+    """Busca Log.csv o log.csv en orden."""
+    for name in ACLARABOT_FILENAMES:
+        file_path = path / name
+        if file_path.exists():
+            return file_path
+    return None
+
+
+def combine_aclarabot(base_path: Path, entornos: list, year: int, month: int, out_folder: Path):
+    frames = []
+    for entorno in entornos:
+        base_folder = base_path / entorno / "Log" / f"{year}" / f"{month:02d}"
+        ruta = find_aclarabot_file(base_folder)
+
+        if ruta:
+            emoji(f"Encontrado log en {entorno}: {ruta}", "🔍")
+            df = read_csv_limited(ruta, ACLARABOT_MAX_COLS)
+            df.insert(0, "ENTORNO", entorno)
+            frames.append(df)
+        else:
+            emoji(f"No se encontró Log para {entorno}", "⚠️")
+
+    if not frames:
+        emoji("No hay datos válidos para combinar.", "⚠️")
         return None
 
-def generar_reporte_resumen(df_aclarabot, df_aclarapp):
-    """Genera un reporte resumen de los datos procesados"""
-    print("\n" + "="*60)
-    print("📊 REPORTE RESUMEN")
-    print("="*60)
-    
-    if df_aclarabot is not None:
-        print("\n📋 ACLARABOT:")
-        print(f"   Total de registros: {len(df_aclarabot):,}")
-        print(f"   Total de columnas: {len(df_aclarabot.columns)}")
-        
-        # Conteo por entorno
-        if 'ENTORNO' in df_aclarabot.columns:
-            conteo_entornos = df_aclarabot['ENTORNO'].value_counts()
-            print("\n   Distribución por entorno:")
-            for entorno, cantidad in conteo_entornos.items():
-                print(f"   - {entorno}: {cantidad:,} registros")
-    
-    if df_aclarapp is not None:
-        print("\n📱 ACLARAPP:")
-        print(f"   Total de registros: {len(df_aclarapp):,}")
-        print(f"   Total de columnas: {len(df_aclarapp.columns)}")
-    
-    print("\n" + "="*60)
-    print("🎉 PROCESO COMPLETADO EXITOSAMENTE!")
-    print("="*60)
+    combined = pd.concat(frames, ignore_index=True)
+    out_path = out_folder / "Aclarabot_combinado.csv"
+    combined.to_csv(out_path, index=False)
+    emoji(f"Aclarabot combinado guardado en: {out_path}", "💾")
+
+    return out_path
+
+
+def process_aclarapp(aclarapp_path: Path, out_folder: Path):
+    emoji(f"Procesando Aclarapp: {aclarapp_path}", "📄")
+    df = read_csv_limited(aclarapp_path, ACLARAPP_MAX_COLS)
+    if df.empty:
+        emoji("Archivo Aclarapp no encontrado o vacío.", "⚠️")
+        return None
+
+    out_path = out_folder / "Aclarapp_limpio.csv"
+    df.to_csv(out_path, index=False)
+    emoji(f"Aclarapp limpio guardado en: {out_path}", "💾")
+
+    return out_path
+
+
+# ----------------------
+# MAIN
+# ----------------------
 
 def main():
-    """Función principal"""
-    print("\n" + "✨" * 30)
-    print("   REPORTE ACLARABOT Y ACLARAPP")
-    print("✨" * 30)
-    
-    # Procesar archivos de Aclarabot
-    ruta_aclarabot, df_aclarabot = procesar_archivos_aclarabot()
-    
-    # Procesar archivo de Aclarapp
-    df_aclarapp = procesar_archivo_aclarapp()
-    
-    # Generar reporte resumen
-    generar_reporte_resumen(df_aclarabot, df_aclarapp)
-    
-    # Mostrar ubicación de archivos generados
-    if ruta_aclarabot:
-        print(f"\n📍 Archivo Aclarabot generado en:\n   {ruta_aclarabot}")
-    
-    print("\n🤖 ¡Listo! Todos los archivos han sido procesados.")
-    print("💾 Recuerda guardar tus archivos de entrada para futuros reportes.")
+    hoy = datetime.date.today()
+    carpeta_diaria = OUTPUT_BASE / hoy.strftime("%Y-%m-%d")
+
+    # Crear carpeta diaria
+    ensure_dir(carpeta_diaria)
+
+    # 🔥 Nuevo: borrar CSV viejos antes de procesar
+    delete_old_csvs(OUTPUT_BASE)
+
+    combine_aclarabot(BASE_ACLARABOT, ENTORNOS, hoy.year, hoy.month, carpeta_diaria)
+    process_aclarapp(ACLARAPP_COPY_PATH, carpeta_diaria)
+
+    emoji("Proceso completado ✅", "✅")
+
 
 if __name__ == "__main__":
     main()
