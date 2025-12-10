@@ -1,0 +1,175 @@
+import os
+import pandas as pd
+from datetime import datetime
+import glob
+import shutil
+
+def crear_carpeta_si_no_existe(ruta):
+    """Crea una carpeta si no existe"""
+    if not os.path.exists(ruta):
+        os.makedirs(ruta)
+        print("📁 Carpeta creada:", ruta)
+    return ruta
+
+def procesar_archivos_aclarabot():
+    """Procesa los archivos de Aclarabot de los 3 entornos"""
+    print("\n" + "="*60)
+    print("🚀 PROCESANDO ARCHIVOS ACLARABOT")
+    print("="*60)
+    
+    # Obtener fecha actual
+    ahora = datetime.now()
+    año_actual = ahora.year
+    mes_actual = ahora.strftime("%m")
+    dia_actual = ahora.strftime("%d")
+    
+    # Definir rutas base
+    ruta_base = "../Carpeta/Aclarabot"
+    entornos = ["DEV", "UAT", "PROD"]
+    
+    # Crear carpeta de destino
+    carpeta_destino_base = "c:/Copia-reporte-Aclarabot"
+    crear_carpeta_si_no_existe(carpeta_destino_base)
+    
+    # Nombre del archivo final (ej: 10-Nov-Dec.csv)
+    nombre_archivo_final = f"{dia_actual}-{ahora.strftime('%b')}.csv"
+    ruta_final = os.path.join(carpeta_destino_base, nombre_archivo_final)
+    
+    # Lista para almacenar todos los DataFrames
+    datos_combinados = []
+    
+    for entorno in entornos:
+        print(f"\n🔍 Buscando archivo para entorno: {entorno}")
+        
+        # Construir la ruta del archivo
+        ruta_archivo = os.path.join(ruta_base, entorno, "Log", str(año_actual), mes_actual, "Log.csv")
+        
+        if os.path.exists(ruta_archivo):
+            print(f"   ✅ Archivo encontrado: {ruta_archivo}")
+            
+            try:
+                # Leer el archivo CSV (solo primeras 12 columnas)
+                df = pd.read_csv(ruta_archivo, usecols=range(12))
+                
+                # Agregar columna de entorno al principio
+                df.insert(0, 'ENTORNO', entorno)
+                
+                datos_combinados.append(df)
+                print(f"   📊 Filas procesadas: {len(df)}")
+                
+            except Exception as e:
+                print(f"   ❌ Error al procesar {entorno}: {e}")
+        else:
+            print(f"   ⚠️  Archivo no encontrado: {ruta_archivo}")
+    
+    if datos_combinados:
+        # Combinar todos los DataFrames
+        df_final = pd.concat(datos_combinados, ignore_index=True)
+        
+        # Guardar el archivo combinado
+        df_final.to_csv(ruta_final, index=False)
+        print(f"\n✨ ARCHIVO ACLARABOT GUARDADO EXITOSAMENTE")
+        print(f"   📍 Ruta: {ruta_final}")
+        print(f"   📈 Total de filas: {len(df_final)}")
+        print(f"   📊 Total de columnas: {len(df_final.columns)}")
+        
+        return ruta_final, df_final
+    else:
+        print("\n❌ No se encontraron datos para procesar")
+        return None, None
+
+def procesar_archivo_aclarapp():
+    """Procesa el archivo de Aclarapp"""
+    print("\n" + "="*60)
+    print("📱 PROCESANDO ARCHIVO ACLARAPP")
+    print("="*60)
+    
+    # Ruta del archivo de Aclarapp
+    ruta_aclarapp = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv"
+    
+    # Crear carpeta si no existe
+    carpeta_aclarapp = os.path.dirname(ruta_aclarapp)
+    crear_carpeta_si_no_existe(carpeta_aclarapp)
+    
+    if os.path.exists(ruta_aclarapp):
+        print(f"✅ Archivo encontrado: {ruta_aclarapp}")
+        
+        try:
+            # Leer el archivo CSV (solo primeras 13 columnas)
+            df_aclarapp = pd.read_csv(ruta_aclarapp, usecols=range(13))
+            
+            print(f"📊 Filas procesadas: {len(df_aclarapp)}")
+            print(f"📈 Columnas procesadas: {len(df_aclarapp.columns)}")
+            
+            # Mostrar primeras filas
+            print("\n👀 Vista previa de los datos:")
+            print(df_aclarapp.head())
+            
+            return df_aclarapp
+            
+        except Exception as e:
+            print(f"❌ Error al procesar archivo Aclarapp: {e}")
+            return None
+    else:
+        print(f"⚠️  Archivo no encontrado: {ruta_aclarapp}")
+        print("💡 Por favor, coloca el archivo en la ubicación especificada")
+        
+        # Crear archivo de ejemplo vacío
+        columnas = [f"Columna_{i+1}" for i in range(13)]
+        df_vacio = pd.DataFrame(columns=columnas)
+        df_vacio.to_csv(ruta_aclarapp, index=False)
+        print(f"📄 Se ha creado un archivo vacío en: {ruta_aclarapp}")
+        
+        return None
+
+def generar_reporte_resumen(df_aclarabot, df_aclarapp):
+    """Genera un reporte resumen de los datos procesados"""
+    print("\n" + "="*60)
+    print("📊 REPORTE RESUMEN")
+    print("="*60)
+    
+    if df_aclarabot is not None:
+        print("\n📋 ACLARABOT:")
+        print(f"   Total de registros: {len(df_aclarabot):,}")
+        print(f"   Total de columnas: {len(df_aclarabot.columns)}")
+        
+        # Conteo por entorno
+        if 'ENTORNO' in df_aclarabot.columns:
+            conteo_entornos = df_aclarabot['ENTORNO'].value_counts()
+            print("\n   Distribución por entorno:")
+            for entorno, cantidad in conteo_entornos.items():
+                print(f"   - {entorno}: {cantidad:,} registros")
+    
+    if df_aclarapp is not None:
+        print("\n📱 ACLARAPP:")
+        print(f"   Total de registros: {len(df_aclarapp):,}")
+        print(f"   Total de columnas: {len(df_aclarapp.columns)}")
+    
+    print("\n" + "="*60)
+    print("🎉 PROCESO COMPLETADO EXITOSAMENTE!")
+    print("="*60)
+
+def main():
+    """Función principal"""
+    print("\n" + "✨" * 30)
+    print("   REPORTE ACLARABOT Y ACLARAPP")
+    print("✨" * 30)
+    
+    # Procesar archivos de Aclarabot
+    ruta_aclarabot, df_aclarabot = procesar_archivos_aclarabot()
+    
+    # Procesar archivo de Aclarapp
+    df_aclarapp = procesar_archivo_aclarapp()
+    
+    # Generar reporte resumen
+    generar_reporte_resumen(df_aclarabot, df_aclarapp)
+    
+    # Mostrar ubicación de archivos generados
+    if ruta_aclarabot:
+        print(f"\n📍 Archivo Aclarabot generado en:\n   {ruta_aclarabot}")
+    
+    print("\n🤖 ¡Listo! Todos los archivos han sido procesados.")
+    print("💾 Recuerda guardar tus archivos de entrada para futuros reportes.")
+
+if __name__ == "__main__":
+    main()
