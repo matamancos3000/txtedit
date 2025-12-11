@@ -3,108 +3,213 @@ import pandas as pd
 from datetime import datetime
 import re
 
-def procesar_aclarabot_simple():
-    """Versión simple para Aclarabot"""
-    ahora = datetime.now()
-    destino = "c:/Copia-reporte-Aclarabot"
-    
-    # Crear carpeta
-    os.makedirs(destino, exist_ok=True)
-    
-    archivo_final = f"{destino}/{ahora.strftime('%d-%b')}.csv"
-    datos = []
-    
-    for env in ["DEV", "UAT", "PROD"]:
-        ruta = f"../Carpeta/Aclarabot/{env}/Log/{ahora.year}/{ahora.strftime('%m')}/Log.csv"
-        
-        if os.path.exists(ruta):
-            try:
-                df = pd.read_csv(ruta, usecols=range(12), encoding='utf-8', 
-                               on_bad_lines='skip', engine='python')
-                df.insert(0, 'ENTORNO', env)
-                datos.append(df)
-                print(f"Aclarabot {env}: {len(df)} filas")
-            except:
-                print(f"Error en {env}")
-    
-    if datos:
-        pd.concat(datos).to_csv(archivo_final, index=False, encoding='utf-8-sig')
-        print(f"✓ Guardado: {archivo_final}")
-        return archivo_final
-    
-    return None
+# ==================== CONFIGURACIÓN ====================
+RUTA_BASE_ACLARABOT = "../Carpeta/Aclarabot"
+RUTA_DESTINO = "c:/Copia-reporte-Aclarabot"
+RUTA_ACLARAPP = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv"
+ENTORNOS = ["DEV", "UAT", "PROD"]
 
-def procesar_aclarapp_simple():
-    """Versión simple para Aclarapp"""
-    ruta_archivo = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv"
+# ==================== FUNCIONES PARA ACLARABOT ====================
+def procesar_aclarabot():
+    """Procesa los archivos Log.csv de Aclarabot"""
+    print("Procesando archivos Aclarabot...")
     
-    # Crear carpeta
-    os.makedirs(os.path.dirname(ruta_archivo), exist_ok=True)
+    # Preparar fecha
+    ahora = datetime.now()
+    fecha_archivo = f"{ahora.strftime('%d-%b')}.csv"
+    ruta_final = os.path.join(RUTA_DESTINO, fecha_archivo)
     
-    if not os.path.exists(ruta_archivo):
-        print("✗ Archivo no encontrado")
+    # Crear carpeta si no existe
+    if not os.path.exists(RUTA_DESTINO):
+        os.makedirs(RUTA_DESTINO)
+    
+    # Lista para guardar datos
+    todos_datos = []
+    
+    for entorno in ENTORNOS:
+        # Construir ruta del archivo
+        ruta_archivo = os.path.join(
+            RUTA_BASE_ACLARABOT, 
+            entorno, 
+            "Log", 
+            str(ahora.year), 
+            ahora.strftime("%m"), 
+            "Log.csv"
+        )
+        
+        if os.path.exists(ruta_archivo):
+            print(f"  Leyendo {entorno}...")
+            try:
+                # Leer solo primeras 12 columnas
+                df = pd.read_csv(ruta_archivo, usecols=range(12), 
+                               encoding='utf-8', on_bad_lines='skip')
+                
+                # Agregar columna de entorno
+                df.insert(0, 'ENTORNO', entorno)
+                
+                todos_datos.append(df)
+                print(f"    ✓ {len(df)} filas")
+                
+            except Exception as e:
+                print(f"    ✗ Error en {entorno}: {e}")
+        else:
+            print(f"  ✗ Archivo no encontrado: {ruta_archivo}")
+    
+    # Combinar y guardar si hay datos
+    if todos_datos:
+        df_final = pd.concat(todos_datos, ignore_index=True)
+        df_final.to_csv(ruta_final, index=False, encoding='utf-8-sig')
+        print(f"\n✓ Aclarabot guardado: {ruta_final}")
+        print(f"  Total: {len(df_final)} filas")
+        return ruta_final
+    else:
+        print("\n✗ No se procesaron archivos de Aclarabot")
         return None
+
+# ==================== FUNCIONES PARA ACLARAPP ====================
+def extraer_tabla_aclarapp(texto):
+    """Extrae la tabla del texto copiado de la web"""
     
-    # Leer archivo
-    with open(ruta_archivo, 'r', encoding='utf-8') as f:
-        lineas = f.readlines()
+    # Buscar donde empieza la tabla
+    lineas = texto.split('\n')
     
-    # Buscar tabla
-    tabla_inicio = -1
+    # Patrones para buscar el inicio de la tabla
+    patrones_inicio = [
+        r'ID Aclaración\s+Registro\s+Folio\s+CIS',
+        r'ID Aclaración.*Registro.*Folio.*CIS',
+        'ID Aclaración\tRegistro\tFolio\tCIS',
+        'ID Aclaración'
+    ]
+    
+    inicio_idx = -1
+    
+    # Buscar inicio de tabla
     for i, linea in enumerate(lineas):
-        if 'ID Aclaración' in linea and ('Registro' in linea or 'Folio' in linea):
-            tabla_inicio = i
+        linea_limpia = linea.strip()
+        
+        # Verificar si esta línea contiene los encabezados
+        if any(patron in linea_limpia for patron in patrones_inicio):
+            inicio_idx = i
+            print(f"  Tabla encontrada en línea {i+1}")
             break
     
-    if tabla_inicio == -1:
-        print("✗ No se encontró la tabla")
+    if inicio_idx == -1:
+        print("  No se encontró el inicio de la tabla")
         return None
     
-    # Procesar filas
+    # Obtener encabezados
+    if '\t' in lineas[inicio_idx]:
+        encabezados = lineas[inicio_idx].split('\t')
+    else:
+        # Intentar separar por espacios múltiples
+        encabezados = re.split(r'\s{2,}', lineas[inicio_idx])
+    
+    # Si no tenemos suficientes encabezados, usar los predeterminados
+    if len(encabezados) < 11:
+        encabezados = [
+            'ID Aclaración', 'Registro', 'Folio', 'CIS', 'Fecha Creación',
+            'Fecha Enviado', 'Fecha Asignacion', 'Fecha Atendido', 
+            'Estado Actual', 'Intentos', 'Acciones'
+        ]
+    
+    # Recopilar filas de datos
     datos = []
-    for i in range(tabla_inicio + 1, len(lineas)):
+    
+    for i in range(inicio_idx + 1, len(lineas)):
         linea = lineas[i].strip()
         
-        if not linea or 'Mostrando' in linea:
+        # Detener si encontramos el final
+        if 'Mostrando' in linea or 'Mostrar' in linea or not linea:
             break
         
-        # Separar por tabs o espacios
+        # Separar la fila
         if '\t' in linea:
             fila = linea.split('\t')
         else:
-            # Para múltiples espacios
-            partes = [p for p in linea.split(' ') if p]
-            if len(partes) >= 11:
-                fila = partes[:11]
-            else:
-                continue
+            # Usar regex para separar por 2 o más espacios
+            fila = re.split(r'\s{2,}', linea)
         
+        # Asegurar que tenga 11 columnas
         if len(fila) >= 11:
             datos.append(fila[:11])
     
     if datos:
-        # Columnas
-        columnas = ['ID Aclaración', 'Registro', 'Folio', 'CIS', 'Fecha Creación',
-                   'Fecha Enviado', 'Fecha Asignacion', 'Fecha Atendido', 
-                   'Estado Actual', 'Intentos', 'Acciones']
-        
-        df = pd.DataFrame(datos, columns=columnas)
-        
-        # Guardar
-        ruta_limpia = ruta_archivo.replace('.csv', '_LIMPIADO.csv')
-        df.to_csv(ruta_limpia, index=False, encoding='utf-8-sig')
-        
-        print(f"✓ Aclarapp: {len(df)} filas extraídas")
-        print(f"  Guardado: {ruta_limpia}")
-        
-        return df
-    
-    print("✗ No se extrajeron datos")
-    return None
+        print(f"  {len(datos)} filas extraídas")
+        return pd.DataFrame(datos, columns=encabezados[:11])
+    else:
+        print("  No se extrajeron datos")
+        return None
 
-# Ejecutar ambos
-print("INICIANDO PROCESO...\n")
-procesar_aclarabot_simple()
-print()
-procesar_aclarapp_simple()
-print("\n✅ FIN DEL PROCESO")
+def procesar_aclarapp():
+    """Procesa el archivo de Aclarapp copiado de la web"""
+    print("\nProcesando archivo Aclarapp...")
+    
+    # Crear carpeta si no existe
+    carpeta_aclarapp = os.path.dirname(RUTA_ACLARAPP)
+    if not os.path.exists(carpeta_aclarapp):
+        os.makedirs(carpeta_aclarapp)
+    
+    if os.path.exists(RUTA_ACLARAPP):
+        print(f"  Archivo encontrado: {RUTA_ACLARAPP}")
+        
+        try:
+            # Leer archivo como texto
+            with open(RUTA_ACLARAPP, 'r', encoding='utf-8') as f:
+                contenido = f.read()
+            
+            # Extraer tabla
+            df = extraer_tabla_aclarapp(contenido)
+            
+            if df is not None and not df.empty:
+                # Guardar tabla limpia
+                ruta_limpia = RUTA_ACLARAPP.replace('.csv', '_LIMPIADO.csv')
+                df.to_csv(ruta_limpia, index=False, encoding='utf-8-sig')
+                
+                print(f"  ✓ Tabla guardada: {ruta_limpia}")
+                print(f"    {len(df)} filas, {len(df.columns)} columnas")
+                
+                # Mostrar vista previa
+                print("\n  Vista previa:")
+                print(df.head(3).to_string())
+                
+                return df
+            else:
+                print("  ✗ No se pudo extraer la tabla")
+                return None
+                
+        except Exception as e:
+            print(f"  ✗ Error procesando Aclarapp: {e}")
+            return None
+    else:
+        print(f"  ✗ Archivo no encontrado: {RUTA_ACLARAPP}")
+        print("  💡 Copia el texto de la web en este archivo")
+        return None
+
+# ==================== FUNCIÓN PRINCIPAL ====================
+def main():
+    """Ejecuta todo el proceso"""
+    print("=" * 50)
+    print("SISTEMA DE REPORTES - ACLARABOT Y ACLARAPP")
+    print("=" * 50)
+    
+    # Procesar Aclarabot
+    archivo_aclarabot = procesar_aclarabot()
+    
+    # Procesar Aclarapp
+    df_aclarapp = procesar_aclarapp()
+    
+    print("\n" + "=" * 50)
+    print("RESUMEN DEL PROCESO")
+    print("=" * 50)
+    
+    if archivo_aclarabot:
+        print(f"✓ Aclarabot: {archivo_aclarabot}")
+    
+    if df_aclarapp is not None:
+        print(f"✓ Aclarapp: {len(df_aclarapp)} filas procesadas")
+    
+    print("\n✅ Proceso completado")
+
+# ==================== EJECUCIÓN ====================
+if __name__ == "__main__":
+    main()
