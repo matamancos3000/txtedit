@@ -3,19 +3,26 @@ import pandas as pd
 from datetime import datetime
 import chardet
 
-# Configuración
+# ============================================================
+# CONFIGURACIÓN
+# ============================================================
 RUTA_BASE = "../Carpeta/Aclarabot"
 DESTINO = "c:/Copia-reporte-Aclarabot"
 ACLARAPP = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv"
 ENTORNOS = ["DEV", "UAT", "PROD"]
 
-# Crear carpeta
+
+# ============================================================
+# UTILIDADES
+# ============================================================
 def crear_dir(ruta):
+    """Crear carpeta si no existe."""
     if not os.path.exists(ruta):
         os.makedirs(ruta)
 
-# Detectar encoding
+
 def get_encoding(archivo):
+    """Detectar encoding real del archivo."""
     try:
         with open(archivo, "rb") as f:
             enc = chardet.detect(f.read(5000))["encoding"]
@@ -23,8 +30,9 @@ def get_encoding(archivo):
     except:
         return "utf-8"
 
-# Buscar Log.csv con may/min
+
 def buscar_log(ruta_folder):
+    """Detectar Log.csv sin importar mayúsculas."""
     nombres = ["Log.csv", "log.csv", "LOG.csv"]
     for nombre in nombres:
         ruta = os.path.join(ruta_folder, nombre)
@@ -32,12 +40,87 @@ def buscar_log(ruta_folder):
             return ruta
     return None
 
-# Proceso Aclarabot
+
+# ============================================================
+# LIMPIEZA DEL ARCHIVO PEGADO DE ACLARAPP
+# ============================================================
+def limpiar_aclarapp_csv(ruta):
+    """Procesar el CSV pegado manualmente desde la página web."""
+
+    with open(ruta, "r", encoding=get_encoding(ruta)) as f:
+        lineas = [l.strip() for l in f.readlines()]
+
+    # -------------------------
+    # 1. Detectar encabezados en varias líneas
+    # -------------------------
+    encabezados = []
+    idx = 0
+
+    while idx < len(lineas):
+        linea = lineas[idx]
+
+        # Fin de encabezados cuando encontremos la línea de tipos
+        if linea.startswith("Varchar") or linea.startswith("Numero"):
+            break
+
+        # Sólo agregamos líneas no vacías
+        if linea:
+            encabezados.append(linea)
+
+        idx += 1
+
+    if len(encabezados) < 2:
+        print("⚠️ No se encontraron encabezados válidos.")
+        return None
+
+    # Unir encabezados en una sola línea CSV
+    header = ",".join(encabezados)
+
+    # -------------------------
+    # 2. Saltar la fila de tipos (Varchar, Numero…)
+    # -------------------------
+    while idx < len(lineas) and not lineas[idx].startswith("Varchar"):
+        idx += 1
+    idx += 1  # saltar la fila de tipos
+
+    # -------------------------
+    # 3. Leer filas reales de la tabla
+    # -------------------------
+    filas = []
+    for linea in lineas[idx:]:
+
+        # Fin cuando empieza "Mostrando 1 a N…"
+        if linea.startswith("Mostrando"):
+            break
+
+        # Quitar filas completamente vacías (,,,)
+        if linea.replace(",", "").strip() == "":
+            continue
+
+        filas.append(linea)
+
+    if not filas:
+        print("⚠️ No se encontraron filas válidas en la tabla Aclarapp.")
+        return None
+
+    # -------------------------
+    # 4. Crear DataFrame final
+    # -------------------------
+    columnas = header.split(",")
+    datos = [f.split(",") for f in filas]
+
+    df = pd.DataFrame(datos, columns=columnas)
+    return df
+
+
+# ============================================================
+# PROCESO ACLARABOT
+# ============================================================
 print("🚀 Procesando Aclarabot...")
 
 crear_dir(DESTINO)
 
-# Eliminar todos los CSV antes de crear uno nuevo
+# Borrar todos los CSV previos
 for file in os.listdir(DESTINO):
     if file.lower().endswith(".csv"):
         os.remove(os.path.join(DESTINO, file))
@@ -66,37 +149,40 @@ for env in ENTORNOS:
             df.insert(0, "ENTORNO", env)
             datos.append(df)
             print(f"  ✅ {env}: {len(df)} filas")
+
         except Exception as e:
             print(f"  ❌ {env}: Error -> {e}")
+
     else:
         print(f"  ⚠️ {env}: No encontrado")
 
-# Guardar final
+# Guardar archivo final de Aclarabot
 if datos:
     final = pd.concat(datos, ignore_index=True)
     final.to_csv(archivo_final, index=False, encoding="utf-8-sig")
     print(f"📊 Guardado: {archivo_final}")
 
-# Procesar Aclarapp
+
+# ============================================================
+# PROCESO ACLARAPP
+# ============================================================
 print("\n📱 Procesando Aclarapp...")
+
 crear_dir(os.path.dirname(ACLARAPP))
 
 if os.path.exists(ACLARAPP):
-    try:
-        df = pd.read_csv(
-            ACLARAPP,
-            encoding=get_encoding(ACLARAPP),
-            usecols=range(13),
-            on_bad_lines="skip",
-            engine="python"
-        )
-        print(f"  ✅ {len(df)} filas")
-    except Exception as e:
-        print(f"  ❌ Error leyendo archivo -> {e}")
+    df = limpiar_aclarapp_csv(ACLARAPP)
+
+    if df is not None:
+        df.to_csv(ACLARAPP, index=False, encoding="utf-8-sig")
+        print(f"  ✅ Archivo Aclarapp limpio ({len(df)} filas)")
+    else:
+        print("  ❌ No se pudo limpiar el archivo")
 else:
-    pd.DataFrame(columns=[f"Col_{i}" for i in range(13)]).to_csv(
-        ACLARAPP, index=False, encoding="utf-8-sig"
-    )
-    print("  📄 Archivo vacío creado")
+    # Crear CSV vacío si no existe
+    columnas = [f"Col_{i}" for i in range(13)]
+    pd.DataFrame(columns=columnas).to_csv(ACLARAPP, index=False, encoding="utf-8-sig")
+    print("  📄 Archivo vacío creado (Aclarapp)")
+
 
 print("\n✅ Proceso terminado")
