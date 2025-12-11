@@ -1,356 +1,222 @@
 import os
+import re
 import pandas as pd
 from datetime import datetime
-import re
 
-# ==================== CONFIGURACIÓN ====================
-RUTA_BASE_ACLARABOT = "../Carpeta/Aclarabot"
+# ============================== CONFIG ==============================
+
+RUTA_BASE_ACLARABOT = r"\\hlah.adroot.hsbc\MX\RBWM\9870\CMU_preview\Proceso CMU\RPA Reporte y Cambio\Aclarabot"
 RUTA_DESTINO = "c:/Copia-reporte-Aclarabot"
 RUTA_ACLARAPP = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv"
+
 ENTORNOS = ["DEV", "UAT", "PROD"]
 
-# ==================== FUNCIONES PARA ACLARABOT ====================
-def procesar_aclarabot():
-    """Procesa los archivos Log.csv de Aclarabot"""
-    print("Procesando archivos Aclarabot...")
-    
-    # Preparar fecha
-    ahora = datetime.now()
-    fecha_archivo = f"{ahora.strftime('%d-%b')}.csv"
-    ruta_final = os.path.join(RUTA_DESTINO, fecha_archivo)
-    
-    # Crear carpeta si no existe
-    if not os.path.exists(RUTA_DESTINO):
-        os.makedirs(RUTA_DESTINO)
-    
-    # Lista para guardar datos
-    todos_datos = []
-    
-    for entorno in ENTORNOS:
-        # Construir ruta del archivo
-        ruta_archivo = os.path.join(
-            RUTA_BASE_ACLARABOT, 
-            entorno, 
-            "Log", 
-            str(ahora.year), 
-            ahora.strftime("%m"), 
-            "Log.csv"
-        )
-        
-        if os.path.exists(ruta_archivo):
-            print(f"  Leyendo {entorno}...")
-            try:
-                # Leer solo primeras 12 columnas
-                df = pd.read_csv(ruta_archivo, usecols=range(12), 
-                               encoding='utf-8', on_bad_lines='skip')
-                
-                # Agregar columna de entorno
-                df.insert(0, 'ENTORNO', entorno)
-                
-                todos_datos.append(df)
-                print(f"    ✓ {len(df)} filas")
-                
-            except Exception as e:
-                print(f"    ✗ Error en {entorno}: {e}")
-        else:
-            print(f"  ✗ Archivo no encontrado: {ruta_archivo}")
-    
-    # Combinar y guardar si hay datos
-    if todos_datos:
-        df_final = pd.concat(todos_datos, ignore_index=True)
-        df_final.to_csv(ruta_final, index=False, encoding='utf-8-sig')
-        print(f"\n✓ Aclarabot guardado: {ruta_final}")
-        print(f"  Total: {len(df_final)} filas")
-        return ruta_final
-    else:
-        print("\n✗ No se procesaron archivos de Aclarabot")
-        return None
+# Espacios raros (del web + Excel)
+ESPACIOS_RAROS = r"[\u00A0\u2000-\u200B\u3000]"
 
-# ==================== FUNCIONES PARA ACLARAPP ====================
+# ============================== UTILIDADES ==============================
+
 def detectar_separador(linea):
-    """Detecta el tipo de separador en una línea"""
-    # Prioridad de separadores
-    if '|' in linea:
-        # Contar cuántos pipes hay - si hay varios, es el separador
-        if linea.count('|') >= 5:  # Al menos 5 pipes para ser considerado separador
-            return '|'
-    
-    if '\t' in linea:
-        # Si hay tab, usarlo
-        return '\t'
-    
-    # Buscar múltiples espacios (3 o más)
-    if re.search(r'\s{3,}', linea):
-        return 'multiples_espacios'
-    
-    # Si no se detecta ningún separador claro, devolver None
+    """
+    Detecta el separador principal que usa una línea.
+    Prioridad: | → tab → espacios raros → espacios normales
+    """
+    if linea.count("|") >= 5:
+        return "|"
+    if "\t" in linea:
+        return "\t"
+    if re.search(f"{ESPACIOS_RAROS}{{3,}}", linea):
+        return "espacios_raros"
+    if re.search(r"\s{3,}", linea):
+        return "espacios_normales"
     return None
 
-def procesar_linea_con_separador(linea, separador):
-    """Procesa una línea según el separador detectado"""
-    if separador == '|':
-        # Separar por pipe, mantener valores vacíos
-        partes = linea.split('|')
-        # Limpiar espacios y mantener todos los campos
-        return [part.strip() for part in partes]
-    
-    elif separador == '\t':
-        # Separar por tab
-        return linea.split('\t')
-    
-    elif separador == 'multiples_espacios':
-        # Separar por 3 o más espacios
-        return re.split(r'\s{3,}', linea.strip())
-    
-    else:
-        # Si no se detectó separador, devolver la línea completa
-        return [linea]
 
-def extraer_tabla_aclarapp(texto):
-    """Extrae la tabla del texto copiado de la web"""
-    
-    # Buscar donde empieza la tabla
-    lineas = [linea.rstrip('\r') for linea in texto.split('\n')]
-    
-    # Patrones para buscar el inicio de la tabla
-    patrones_inicio = [
-        r'ID Aclaración[\s\|]+Registro[\s\|]+Folio[\s\|]+CIS',
-        r'ID Aclaración.*Registro.*Folio.*CIS',
-        'ID Aclaración|Registro|Folio|CIS',
-        'ID Aclaración\tRegistro\tFolio\tCIS',
-        'ID Aclaración   Registro   Folio   CIS'
+def separar_linea(linea, separador):
+    """Separa una línea según el separador detectado."""
+    if separador == "|":
+        return [x.strip() for x in linea.split("|")]
+
+    if separador == "\t":
+        return linea.split("\t")
+
+    if separador == "espacios_raros":
+        return re.split(f"{ESPACIOS_RAROS}{{3,}}", linea.strip())
+
+    if separador == "espacios_normales":
+        return re.split(r"\s{3,}", linea.strip())
+
+    return [linea.strip()]
+
+
+# ========================= EXTRAER TABLA ACLARAPP =========================
+
+def extraer_tabla_desde_texto(texto):
+    """
+    Extrae automáticamente la tabla pegada desde la web.
+    Ultra resistente a formatos basura.
+    """
+
+    lineas = texto.split("\n")
+
+    # Buscar encabezado real
+    patrones_encabezado = [
+        "ID Aclaración",
+        "Registro",
+        "Folio",
+        "CIS"
     ]
-    
-    inicio_idx = -1
-    separador_detectado = None
-    
-    # Buscar inicio de tabla
+
+    inicio = None
+
     for i, linea in enumerate(lineas):
-        linea_limpia = linea.strip()
-        
-        if not linea_limpia:
-            continue
-            
-        # Verificar si esta línea contiene los encabezados
-        for patron in patrones_inicio:
-            # Para patrones con pipe literal
-            if '|' in patron and '|' in linea_limpia:
-                # Verificar que tenga varios campos separados por pipe
-                if linea_limpia.count('|') >= 3:
-                    inicio_idx = i
-                    separador_detectado = detectar_separador(linea)
-                    break
-            # Para otros patrones
-            elif patron in linea_limpia:
-                inicio_idx = i
-                separador_detectado = detectar_separador(linea)
-                break
-        
-        if inicio_idx != -1:
+        if all(p in linea for p in patrones_encabezado):
+            inicio = i
             break
-    
-    if inicio_idx == -1:
-        print("  No se encontró el inicio de la tabla")
-        print("  Buscando 'ID Aclaración' en primeras 30 líneas...")
-        for i, linea in enumerate(lineas[:30]):
-            if 'ID Aclaración' in linea:
-                print(f"  Línea {i+1}: {linea[:80]}")
-                # Intentar detectar separador de esta línea
-                sep = detectar_separador(linea)
-                print(f"  Separador potencial: {repr(sep)}")
+
+    if inicio is None:
+        print("✗ No se encontró encabezado de tabla.")
         return None
-    
-    print(f"  Tabla encontrada en línea {inicio_idx+1}")
-    print(f"  Separador detectado: {repr(separador_detectado)}")
-    
-    # Mostrar la línea de encabezados para depuración
-    print(f"  Línea encabezados: {lineas[inicio_idx][:100]}...")
-    
-    # Obtener encabezados usando el separador detectado
-    if separador_detectado:
-        encabezados = procesar_linea_con_separador(lineas[inicio_idx], separador_detectado)
-    else:
-        # Si no se detectó separador, intentar adivinarlo
-        print("  No se detectó separador claro, intentando inferir...")
-        
-        # Verificar si tiene pipes
-        if '|' in lineas[inicio_idx] and lineas[inicio_idx].count('|') >= 3:
-            separador_detectado = '|'
-        # Verificar si tiene tabs
-        elif '\t' in lineas[inicio_idx]:
-            separador_detectado = '\t'
-        # Verificar si tiene múltiples espacios
-        elif re.search(r'\s{3,}', lineas[inicio_idx]):
-            separador_detectado = 'multiples_espacios'
-        else:
-            print("  No se pudo determinar el separador")
-            return None
-            
-        encabezados = procesar_linea_con_separador(lineas[inicio_idx], separador_detectado)
-    
-    print(f"  Encabezados extraídos ({len(encabezados)}): {encabezados}")
-    
-    # Si no tenemos suficientes encabezados, usar los predeterminados
-    if len(encabezados) < 10:
-        print(f"  Sólo se encontraron {len(encabezados)} encabezados, usando predeterminados")
-        encabezados = [
-            'ID Aclaración', 'Registro', 'Folio', 'CIS', 'Fecha Creación',
-            'Fecha Enviado', 'Fecha Asignacion', 'Fecha Atendido', 
-            'Estado Actual', 'Intentos', 'Acciones'
-        ]
-    
-    # Recopilar filas de datos
+
+    encabezado_linea = lineas[inicio].rstrip("\r")
+
+    separador = detectar_separador(encabezado_linea)
+
+    if separador is None:
+        print("✗ No se detectó separador claro.")
+        return None
+
+    # Separar encabezados encontrados
+    encabezados = separar_linea(encabezado_linea, separador)
+
+    # Forzar encabezados correctos si se detectan mal
+    encabezados_estandar = [
+        'ID Aclaración', 'Registro', 'Folio', 'CIS',
+        'Fecha Creación', 'Fecha Enviado',
+        'Fecha Asignacion', 'Fecha Atendido',
+        'Estado Actual', 'Intentos', 'Acciones'
+    ]
+
+    if len(encabezados) < 5:
+        encabezados = encabezados_estandar
+
+    # Leer filas de datos
     datos = []
-    lineas_procesadas = 0
-    
-    for i in range(inicio_idx + 1, len(lineas)):
-        linea = lineas[i].strip()
-        
-        # Si la línea está vacía, continuar
-        if not linea:
-            continue
-            
-        # Detener si encontramos el final
-        if 'Mostrando' in linea or 'Mostrar' in linea or 'entradas' in linea.lower():
-            print(f"  Fin de tabla detectado en línea {i+1}: '{linea[:50]}...'")
+
+    for linea in lineas[inicio+1:]:
+        if "Mostrando" in linea or "entradas" in linea:
             break
-        
-        # Verificar si parece ser una línea de datos
-        # Debe tener una longitud mínima y no ser solo texto
-        if len(linea) < 30:  # Línea muy corta probablemente no sea datos
+        if len(linea.strip()) < 5:
             continue
-        
-        lineas_procesadas += 1
-        
-        # Procesar la línea con el separador detectado
-        fila = procesar_linea_con_separador(lineas[i], separador_detectado)
-        
-        # Filtrar elementos vacíos
-        fila = [campo for campo in fila if campo != '']
-        
-        # Asegurar que tenga suficientes columnas
-        if len(fila) >= 10:
-            # Si tiene exactamente 10, agregar campo vacío para Acciones
-            if len(fila) == 10:
-                fila.append('')
-            datos.append(fila[:11])
-        elif 7 <= len(fila) < 10:
-            # Rellenar con valores vacíos hasta tener 11
-            while len(fila) < 11:
-                fila.append('')
-            datos.append(fila[:11])
-    
-    print(f"  Líneas procesadas: {lineas_procesadas}")
-    
-    if datos:
-        print(f"  {len(datos)} filas de datos extraídas")
-        
-        # Crear DataFrame
-        try:
-            # Asegurarnos de que tenemos suficientes columnas
-            columnas_finales = encabezados[:11] if len(encabezados) >= 11 else encabezados
-            
-            # Si no tenemos 11 columnas, agregar nombres genéricos para las que faltan
-            while len(columnas_finales) < 11:
-                columnas_finales.append(f'Columna_{len(columnas_finales)+1}')
-            
-            df = pd.DataFrame(datos, columns=columnas_finales)
-            print(f"  DataFrame creado: {len(df)} filas x {len(df.columns)} columnas")
-            return df
-            
-        except Exception as e:
-            print(f"  Error creando DataFrame: {e}")
-            print(f"  Número de columnas en datos: {len(datos[0]) if datos else 0}")
-            
-            # Intentar mostrar las primeras filas para depuración
-            if datos:
-                print("  Primeras 2 filas de datos:")
-                for j, fila in enumerate(datos[:2]):
-                    print(f"  Fila {j+1}: {fila}")
-            
-            return None
-    else:
-        print("  No se extrajeron datos")
+
+        fila = separar_linea(linea, separador)
+
+        # Ignorar si no parece fila válida
+        if len(fila) < 4:
+            continue
+
+        # Normalizar a 11 columnas
+        while len(fila) < 11:
+            fila.append("")
+
+        datos.append(fila[:11])
+
+    if not datos:
+        print("✗ No se extrajeron filas.")
         return None
+
+    df = pd.DataFrame(datos, columns=encabezados)
+
+    # Limpieza adicional
+    df = df.applymap(lambda x: x.replace("\r", " ").replace("\n", " ").strip() if isinstance(x, str) else x)
+
+    return df
+
+
+# ========================= PROCESAR ACLARABOT =========================
+
+def procesar_aclarabot():
+    print("\n=== Procesando ACLARABOT ===")
+
+    hoy = datetime.now()
+    archivo_salida = os.path.join(RUTA_DESTINO, hoy.strftime("%d-%b") + ".csv")
+
+    if not os.path.exists(RUTA_DESTINO):
+        os.makedirs(RUTA_DESTINO)
+
+    frames = []
+
+    for ent in ENTORNOS:
+        ruta = os.path.join(
+            RUTA_BASE_ACLARABOT,
+            ent, "Log",
+            str(hoy.year),
+            hoy.strftime("%m"),
+            "Log.csv"
+        )
+
+        if not os.path.exists(ruta):
+            print(f"  ✗ No encontrado: {ruta}")
+            continue
+
+        try:
+            df = pd.read_csv(ruta, usecols=range(12), encoding="utf-8", on_bad_lines="skip")
+            df.insert(0, "ENTORNO", ent)
+            frames.append(df)
+            print(f"  ✓ {ent}: {len(df)} filas")
+
+        except Exception as e:
+            print(f"  ✗ Error leyendo {ent}: {e}")
+
+    if frames:
+        df_final = pd.concat(frames, ignore_index=True)
+        df_final.to_csv(archivo_salida, index=False, encoding="utf-8-sig")
+        print(f"\n✓ Guardado: {archivo_salida}")
+    else:
+        print("\n✗ No se procesó ningún entorno.")
+
+
+# ========================= PROCESAR ACLARAPP =========================
 
 def procesar_aclarapp():
-    """Procesa el archivo de Aclarapp copiado de la web"""
-    print("\nProcesando archivo Aclarapp...")
-    
-    # Crear carpeta si no existe
-    carpeta_aclarapp = os.path.dirname(RUTA_ACLARAPP)
-    if not os.path.exists(carpeta_aclarapp):
-        os.makedirs(carpeta_aclarapp)
-    
-    if os.path.exists(RUTA_ACLARAPP):
-        print(f"  Archivo encontrado: {RUTA_ACLARAPP}")
-        
-        try:
-            # Leer archivo como texto
-            with open(RUTA_ACLARAPP, 'r', encoding='utf-8') as f:
-                contenido = f.read()
-            
-            print(f"  Tamaño del archivo: {len(contenido)} caracteres")
-            print(f"  Número de líneas: {contenido.count(chr(10)) + 1}")
-            
-            # Extraer tabla
-            df = extraer_tabla_aclarapp(contenido)
-            
-            if df is not None and not df.empty:
-                # Guardar tabla limpia
-                ruta_limpia = RUTA_ACLARAPP.replace('.csv', '_LIMPIADO.csv')
-                df.to_csv(ruta_limpia, index=False, encoding='utf-8-sig')
-                
-                print(f"  ✓ Tabla guardada: {ruta_limpia}")
-                print(f"    {len(df)} filas, {len(df.columns)} columnas")
-                
-                # Mostrar vista previa
-                print("\n  Vista previa (primeras 3 filas):")
-                print(df.head(3).to_string(index=False))
-                
-                return df
-            else:
-                print("  ✗ No se pudo extraer la tabla")
-                print("  Mostrando primeras 15 líneas del archivo:")
-                lineas = contenido.split('\n')
-                for i, linea in enumerate(lineas[:15]):
-                    print(f"  {i+1:3}: {repr(linea)[:80]}")
-                return None
-                
-        except Exception as e:
-            print(f"  ✗ Error procesando Aclarapp: {e}")
-            return None
-    else:
-        print(f"  ✗ Archivo no encontrado: {RUTA_ACLARAPP}")
-        print("  💡 Copia el texto de la web en este archivo")
+    print("\n=== Procesando ACLARAPP ===")
+
+    if not os.path.exists(RUTA_ACLARAPP):
+        print(f"✗ Archivo no existe:\n  {RUTA_ACLARAPP}")
         return None
 
-# ==================== FUNCIÓN PRINCIPAL ====================
-def main():
-    """Ejecuta todo el proceso"""
-    print("=" * 60)
-    print("SISTEMA DE REPORTES - ACLARABOT Y ACLARAPP")
-    print("=" * 60)
-    
-    # Procesar Aclarabot
-    archivo_aclarabot = procesar_aclarabot()
-    
-    # Procesar Aclarapp
-    df_aclarapp = procesar_aclarapp()
-    
-    print("\n" + "=" * 60)
-    print("RESUMEN DEL PROCESO")
-    print("=" * 60)
-    
-    if archivo_aclarabot:
-        print(f"✓ Aclarabot: {archivo_aclarabot}")
-    
-    if df_aclarapp is not None:
-        print(f"✓ Aclarapp: {len(df_aclarapp)} filas procesadas")
-        print(f"  Archivo limpio: TablaCopiadaDeAclarapp_LIMPIADO.csv")
-    
-    print("\n✅ Proceso completado")
+    with open(RUTA_ACLARAPP, "r", encoding="utf-8") as f:
+        contenido = f.read()
 
-# ==================== EJECUCIÓN ====================
+    df = extraer_tabla_desde_texto(contenido)
+
+    if df is None:
+        return None
+
+    salida = RUTA_ACLARAPP.replace(".csv", "_LIMPIADO.csv")
+    df.to_csv(salida, index=False, encoding="utf-8-sig")
+
+    print(f"✓ Tabla limpia guardada en:\n  {salida}")
+    print(f"✓ Filas extraídas: {len(df)}")
+
+    return df
+
+
+# ========================= MAIN =========================
+
+def main():
+    print("="*65)
+    print(" SISTEMA AUTOMÁTICO DE REPORTES ACLARABOT + ACLARAPP ")
+    print("="*65)
+
+    procesar_aclarabot()
+    df_app = procesar_aclarapp()
+
+    print("\n=== RESUMEN ===")
+    if df_app is not None:
+        print(f"✓ Aclarapp procesado: {len(df_app)} filas")
+    print("✓ Proceso completado.")
+
+
 if __name__ == "__main__":
     main()
