@@ -1,349 +1,62 @@
-import os
-import pandas as pd
+import os, pandas as pd
 from datetime import datetime
-import glob
-import shutil
+import chardet
 
-def crear_carpeta_si_no_existe(ruta):
-    """Crea una carpeta si no existe"""
-    if not os.path.exists(ruta):
-        os.makedirs(ruta)
-        print("📁 Carpeta creada:", ruta)
-    return ruta
+# Configuración
+RUTA_BASE = "../Carpeta/Aclarabot"
+DESTINO = "c:/Copia-reporte-Aclarabot"
+ACLARAPP = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv"
+ENTORNOS = ["DEV", "UAT", "PROD"]
 
-def detectar_codificacion(ruta_archivo):
-    """Intenta detectar la codificación del archivo"""
-    import chardet
-    
+# Crear carpeta si no existe
+def crear_dir(ruta):
+    if not os.path.exists(ruta): os.makedirs(ruta)
+
+# Detectar encoding
+def get_encoding(archivo):
     try:
-        with open(ruta_archivo, 'rb') as f:
-            raw_data = f.read(10000)  # Leer solo los primeros 10KB para detectar
-            resultado = chardet.detect(raw_data)
-            encoding = resultado['encoding']
-            confianza = resultado['confidence']
-            
-            print(f"   🔍 Codificación detectada: {encoding} (confianza: {confianza:.2%})")
-            
-            # Si la confianza es baja o es None, usar UTF-8
-            if encoding is None or confianza < 0.7:
-                return 'utf-8'
-            
-            # Asegurar que usamos una codificación válida
-            if encoding.lower() == 'iso-8859-1':
-                return 'latin-1'
-            elif encoding.lower() == 'windows-1252':
-                return 'cp1252'
-            else:
-                return encoding
-    except Exception as e:
-        print(f"   ⚠️  Error detectando codificación: {e}")
+        with open(archivo, 'rb') as f:
+            return chardet.detect(f.read(5000))['encoding'] or 'utf-8'
+    except:
         return 'utf-8'
 
-def leer_csv_con_codificacion(ruta_archivo, n_columnas=None, sep=','):
-    """Lee un CSV intentando diferentes codificaciones"""
-    codificaciones_a_probar = [
-        'utf-8',
-        'latin-1',
-        'iso-8859-1',
-        'cp1252',
-        'windows-1252',
-        'utf-8-sig'  # Para archivos con BOM
-    ]
-    
-    for i, encoding in enumerate(codificaciones_a_probar, 1):
+# Procesar Aclarabot
+print("🚀 Procesando Aclarabot...")
+crear_dir(DESTINO)
+ahora = datetime.now()
+archivo_final = f"{DESTINO}/{ahora.strftime('%d')}-{ahora.strftime('%b')}.csv"
+
+datos = []
+for env in ENTORNOS:
+    ruta = f"{RUTA_BASE}/{env}/Log/{ahora.year}/{ahora.strftime('%m')}/Log.csv"
+    if os.path.exists(ruta):
         try:
-            if n_columnas:
-                df = pd.read_csv(ruta_archivo, encoding=encoding, 
-                                usecols=range(n_columnas), sep=sep,
-                                on_bad_lines='skip', low_memory=False)
-            else:
-                df = pd.read_csv(ruta_archivo, encoding=encoding, 
-                                sep=sep, on_bad_lines='skip', low_memory=False)
-            
-            print(f"   ✅ Codificación exitosa: {encoding}")
-            return df
-        except UnicodeDecodeError:
-            if i == len(codificaciones_a_probar):
-                print(f"   ❌ No se pudo leer con ninguna codificación")
-                raise
-            continue
-        except Exception as e:
-            print(f"   ⚠️  Error con {encoding}: {e}")
-            if i == len(codificaciones_a_probar):
-                raise
-    
-    # Si llegamos aquí, intentamos una última opción
-    try:
-        print("   🔄 Intentando leer con engine='python'...")
-        if n_columnas:
-            df = pd.read_csv(ruta_archivo, encoding='utf-8',
-                           usecols=range(n_columnas), sep=sep,
-                           engine='python', on_bad_lines='skip')
-        else:
-            df = pd.read_csv(ruta_archivo, encoding='utf-8',
-                           sep=sep, engine='python', on_bad_lines='skip')
-        print("   ✅ Lectura exitosa con engine='python'")
-        return df
-    except Exception as e:
-        print(f"   ❌ Error final: {e}")
-        raise
-
-def procesar_archivos_aclarabot():
-    """Procesa los archivos de Aclarabot de los 3 entornos"""
-    print("\n" + "="*60)
-    print("🚀 PROCESANDO ARCHIVOS ACLARABOT")
-    print("="*60)
-    
-    # Obtener fecha actual
-    ahora = datetime.now()
-    año_actual = ahora.year
-    mes_actual = ahora.strftime("%m")
-    dia_actual = ahora.strftime("%d")
-    
-    # Definir rutas base
-    ruta_base = "../Carpeta/Aclarabot"
-    entornos = ["DEV", "UAT", "PROD"]
-    
-    # Crear carpeta de destino
-    carpeta_destino_base = "c:/Copia-reporte-Aclarabot"
-    crear_carpeta_si_no_existe(carpeta_destino_base)
-    
-    # Nombre del archivo final (ej: 10-Nov-Dec.csv)
-    nombre_archivo_final = f"{dia_actual}-{ahora.strftime('%b')}.csv"
-    ruta_final = os.path.join(carpeta_destino_base, nombre_archivo_final)
-    
-    # Lista para almacenar todos los DataFrames
-    datos_combinados = []
-    
-    for entorno in entornos:
-        print(f"\n🔍 Buscando archivo para entorno: {entorno}")
-        
-        # Construir la ruta del archivo
-        ruta_archivo = os.path.join(ruta_base, entorno, "Log", str(año_actual), mes_actual, "Log.csv")
-        
-        if os.path.exists(ruta_archivo):
-            print(f"   ✅ Archivo encontrado: {ruta_archivo}")
-            print(f"   📏 Tamaño: {os.path.getsize(ruta_archivo):,} bytes")
-            
-            try:
-                # Detectar codificación primero
-                print("   🔍 Detectando codificación...")
-                encoding = detectar_codificacion(ruta_archivo)
-                
-                # Leer el archivo CSV con la codificación correcta
-                df = pd.read_csv(ruta_archivo, encoding=encoding, 
-                               usecols=range(12), sep=',',
-                               on_bad_lines='skip', low_memory=False)
-                
-                # Mostrar información sobre las columnas
-                print(f"   📊 Columnas originales: {len(df.columns)}")
-                
-                # Agregar columna de entorno al principio
-                df.insert(0, 'ENTORNO', entorno)
-                
-                # Verificar caracteres especiales
-                print("   🔤 Verificando caracteres especiales...")
-                muestra_texto = df.iloc[0].astype(str).str.cat(sep=' ')[:100]
-                print(f"   👀 Muestra de texto: {muestra_texto}")
-                
-                datos_combinados.append(df)
-                print(f"   ✅ Filas procesadas: {len(df):,}")
-                
-            except Exception as e:
-                print(f"   ❌ Error al procesar {entorno}: {e}")
-                print("   🔄 Intentando método alternativo...")
-                try:
-                    df = leer_csv_con_codificacion(ruta_archivo, n_columnas=12)
-                    df.insert(0, 'ENTORNO', entorno)
-                    datos_combinados.append(df)
-                    print(f"   ✅ Filas procesadas (método alternativo): {len(df):,}")
-                except Exception as e2:
-                    print(f"   ❌ Error en método alternativo: {e2}")
-        else:
-            print(f"   ⚠️  Archivo no encontrado: {ruta_archivo}")
-    
-    if datos_combinados:
-        # Combinar todos los DataFrames
-        df_final = pd.concat(datos_combinados, ignore_index=True)
-        
-        # Guardar el archivo combinado con UTF-8 para garantizar compatibilidad
-        df_final.to_csv(ruta_final, index=False, encoding='utf-8-sig')
-        
-        print(f"\n✨ ARCHIVO ACLARABOT GUARDADO EXITOSAMENTE")
-        print(f"   📍 Ruta: {ruta_final}")
-        print(f"   📈 Total de filas: {len(df_final):,}")
-        print(f"   📊 Total de columnas: {len(df_final.columns)}")
-        print(f"   💾 Tamaño del archivo: {os.path.getsize(ruta_final):,} bytes")
-        
-        return ruta_final, df_final
+            df = pd.read_csv(ruta, encoding=get_encoding(ruta), 
+                           usecols=range(12), on_bad_lines='skip', engine='python')
+            df.insert(0, 'ENTORNO', env)
+            datos.append(df)
+            print(f"  ✅ {env}: {len(df)} filas")
+        except:
+            print(f"  ❌ {env}: Error")
     else:
-        print("\n❌ No se encontraron datos para procesar")
-        return None, None
+        print(f"  ⚠️  {env}: No encontrado")
 
-def procesar_archivo_aclarapp():
-    """Procesa el archivo de Aclarapp"""
-    print("\n" + "="*60)
-    print("📱 PROCESANDO ARCHIVO ACLARAPP")
-    print("="*60)
-    
-    # Ruta del archivo de Aclarapp
-    ruta_aclarapp = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv"
-    
-    # Crear carpeta si no existe
-    carpeta_aclarapp = os.path.dirname(ruta_aclarapp)
-    crear_carpeta_si_no_existe(carpeta_aclarapp)
-    
-    if os.path.exists(ruta_aclarapp):
-        print(f"✅ Archivo encontrado: {ruta_aclarapp}")
-        print(f"📏 Tamaño: {os.path.getsize(ruta_aclarapp):,} bytes")
-        
-        try:
-            # Detectar codificación primero
-            print("🔍 Detectando codificación...")
-            encoding = detectar_codificacion(ruta_aclarapp)
-            
-            # Leer el archivo con la codificación correcta
-            df_aclarapp = pd.read_csv(ruta_aclarapp, encoding=encoding,
-                                    usecols=range(13), sep=',',
-                                    on_bad_lines='skip', low_memory=False)
-            
-            print(f"📊 Filas procesadas: {len(df_aclarapp):,}")
-            print(f"📈 Columnas procesadas: {len(df_aclarapp.columns)}")
-            
-            # Verificar caracteres especiales
-            print("🔤 Verificando caracteres especiales...")
-            if len(df_aclarapp) > 0:
-                muestra_texto = df_aclarapp.iloc[0].astype(str).str.cat(sep=' ')[:100]
-                print(f"👀 Muestra de texto: {muestra_texto}")
-                
-                # Verificar si hay caracteres mal codificados
-                caracteres_problema = ['Ã©', 'Ã¡', 'Ã­', 'Ã³', 'Ãº', 'Ã±']
-                for char in caracteres_problema:
-                    if df_aclarapp.astype(str).apply(lambda x: x.str.contains(char)).any().any():
-                        print(f"   ⚠️  Se detectó posible caracter mal codificado: {char}")
-            
-            # Mostrar primeras filas
-            print("\n👀 Vista previa de los datos:")
-            print(df_aclarapp.head())
-            
-            return df_aclarapp
-            
-        except Exception as e:
-            print(f"❌ Error al procesar archivo Aclarapp: {e}")
-            print("🔄 Intentando método alternativo...")
-            try:
-                df_aclarapp = leer_csv_con_codificacion(ruta_aclarapp, n_columnas=13)
-                print(f"✅ Archivo procesado con método alternativo")
-                print(f"📊 Filas: {len(df_aclarapp):,}")
-                return df_aclarapp
-            except Exception as e2:
-                print(f"❌ Error en método alternativo: {e2}")
-                return None
-    else:
-        print(f"⚠️  Archivo no encontrado: {ruta_aclarapp}")
-        print("💡 Por favor, coloca el archivo en la ubicación especificada")
-        
-        # Crear archivo de ejemplo vacío
-        columnas = [f"Columna_{i+1}" for i in range(13)]
-        df_vacio = pd.DataFrame(columns=columnas)
-        df_vacio.to_csv(ruta_aclarapp, index=False, encoding='utf-8-sig')
-        print(f"📄 Se ha creado un archivo vacío en: {ruta_aclarapp}")
-        
-        return None
+if datos:
+    pd.concat(datos).to_csv(archivo_final, index=False, encoding='utf-8-sig')
+    print(f"📊 Guardado: {archivo_final}")
 
-def corregir_caracteres_mal_codificados(df):
-    """Corrige caracteres mal codificados comunes"""
-    if df is None:
-        return df
-    
-    # Diccionario de correcciones
-    correcciones = {
-        'Ã¡': 'á', 'Ã©': 'é', 'Ã­': 'í', 'Ã³': 'ó', 'Ãº': 'ú',
-        'Ã±': 'ñ', 'Ã': 'Á', 'Ã‰': 'É', 'Ã': 'Í', 'Ã“': 'Ó',
-        'Ãš': 'Ú', 'Ã‘': 'Ñ', 'Ã¼': 'ü', 'Ãœ': 'Ü',
-        'Ã€': 'À', 'Ãˆ': 'È', 'ÃŒ': 'Ì', 'Ã’': 'Ò', 'Ã™': 'Ù',
-        'Ã§': 'ç', 'Ã‡': 'Ç', 'Ã£': 'ã', 'Ãµ': 'õ', 'Ã£': 'ã',
-        'Ã¢': 'â', 'Ãª': 'ê', 'Ã®': 'î', 'Ã´': 'ô', 'Ã»': 'û'
-    }
-    
-    # Aplicar correcciones a todas las columnas de texto
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            for mal, bien in correcciones.items():
-                df[col] = df[col].astype(str).str.replace(mal, bien, regex=False)
-    
-    return df
-
-def generar_reporte_resumen(df_aclarabot, df_aclarapp):
-    """Genera un reporte resumen de los datos procesados"""
-    print("\n" + "="*60)
-    print("📊 REPORTE RESUMEN")
-    print("="*60)
-    
-    if df_aclarabot is not None:
-        print("\n📋 ACLARABOT:")
-        print(f"   Total de registros: {len(df_aclarabot):,}")
-        print(f"   Total de columnas: {len(df_aclarabot.columns)}")
-        
-        # Conteo por entorno
-        if 'ENTORNO' in df_aclarabot.columns:
-            conteo_entornos = df_aclarabot['ENTORNO'].value_counts()
-            print("\n   Distribución por entorno:")
-            for entorno, cantidad in conteo_entornos.items():
-                print(f"   - {entorno}: {cantidad:,} registros")
-    
-    if df_aclarapp is not None:
-        print("\n📱 ACLARAPP:")
-        print(f"   Total de registros: {len(df_aclarapp):,}")
-        print(f"   Total de columnas: {len(df_aclarapp.columns)}")
-    
-    print("\n" + "="*60)
-    print("🎉 PROCESO COMPLETADO EXITOSAMENTE!")
-    print("="*60)
-
-def main():
-    """Función principal"""
-    print("\n" + "✨" * 30)
-    print("   REPORTE ACLARABOT Y ACLARAPP")
-    print("✨" * 30)
-    print("🔤 Versión con corrección de codificación de caracteres")
-    print("="*60)
-    
-    # Procesar archivos de Aclarabot
-    ruta_aclarabot, df_aclarabot = procesar_archivos_aclarabot()
-    
-    # Aplicar corrección de caracteres si es necesario
-    if df_aclarabot is not None:
-        df_aclarabot = corregir_caracteres_mal_codificados(df_aclarabot)
-    
-    # Procesar archivo de Aclarapp
-    df_aclarapp = procesar_archivo_aclarapp()
-    
-    # Aplicar corrección de caracteres si es necesario
-    if df_aclarapp is not None:
-        df_aclarapp = corregir_caracteres_mal_codificados(df_aclarapp)
-    
-    # Generar reporte resumen
-    generar_reporte_resumen(df_aclarabot, df_aclarapp)
-    
-    # Mostrar ubicación de archivos generados
-    if ruta_aclarabot:
-        print(f"\n📍 Archivo Aclarabot generado en:\n   {ruta_aclarabot}")
-        print(f"   Codificación: UTF-8 with BOM (para Excel)")
-    
-    print("\n🤖 ¡Listo! Todos los archivos han sido procesados.")
-    print("🔤 Los caracteres especiales han sido corregidos.")
-    print("💾 Recuerda guardar tus archivos de entrada para futuros reportes.")
-
-if __name__ == "__main__":
-    # Instalar chardet si no está disponible
+# Procesar Aclarapp
+print("\n📱 Procesando Aclarapp...")
+crear_dir(os.path.dirname(ACLARAPP))
+if os.path.exists(ACLARAPP):
     try:
-        import chardet
-    except ImportError:
-        print("📦 Instalando chardet para detección de codificación...")
-        import subprocess
-        import sys
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "chardet"])
-        import chardet
-    
-    main()
+        df = pd.read_csv(ACLARAPP, encoding=get_encoding(ACLARAPP),
+                       usecols=range(13), on_bad_lines='skip', engine='python')
+        print(f"  ✅ {len(df)} filas")
+    except:
+        print("  ❌ Error leyendo archivo")
+else:
+    pd.DataFrame(columns=[f"Col_{i}" for i in range(13)]).to_csv(ACLARAPP, index=False)
+    print("  📄 Archivo vacío creado")
+
+print("\n✅ Proceso terminado")
