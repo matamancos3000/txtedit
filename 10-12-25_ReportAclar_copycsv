@@ -67,50 +67,92 @@ def procesar_aclarabot():
         return None
 
 # ==================== FUNCIONES PARA ACLARAPP ====================
+def detectar_separador(linea):
+    """Detecta el tipo de separador en una línea"""
+    # Prioridad de separadores
+    if '|' in linea:
+        return '|'
+    elif '\t' in linea:
+        return '\t'
+    else:
+        # Contar espacios consecutivos
+        espacios_consecutivos = re.findall(r'\s{2,}', linea)
+        if espacios_consecutivos:
+            return 'multiples_espacios'
+        return 'simple_espacio'
+
+def procesar_linea_con_separador(linea, separador):
+    """Procesa una línea según el separador detectado"""
+    if separador == '|':
+        # Separar por pipe, eliminar espacios al inicio y fin de cada campo
+        partes = [part.strip() for part in linea.split('|') if part.strip() != '']
+        return partes
+    elif separador == '\t':
+        # Separar por tab
+        return linea.split('\t')
+    elif separador == 'multiples_espacios':
+        # Separar por 2 o más espacios
+        return re.split(r'\s{2,}', linea.strip())
+    else:
+        # Separar por cualquier espacio (último recurso)
+        return linea.split()
+
 def extraer_tabla_aclarapp(texto):
     """Extrae la tabla del texto copiado de la web"""
     
     # Buscar donde empieza la tabla
-    lineas = texto.split('\n')
+    lineas = [linea.rstrip('\r') for linea in texto.split('\n')]
     
     # Patrones para buscar el inicio de la tabla
     patrones_inicio = [
-        r'ID Aclaración\s+Registro\s+Folio\s+CIS',
+        r'ID Aclaración[\s\|]Registro[\s\|]Folio[\s\|]CIS',
         r'ID Aclaración.*Registro.*Folio.*CIS',
+        'ID Aclaración|Registro|Folio|CIS',
         'ID Aclaración\tRegistro\tFolio\tCIS',
+        'ID Aclaración  Registro  Folio  CIS',
         'ID Aclaración'
     ]
     
     inicio_idx = -1
+    separador_detectado = None
     
     # Buscar inicio de tabla
     for i, linea in enumerate(lineas):
         linea_limpia = linea.strip()
         
         # Verificar si esta línea contiene los encabezados
-        if any(patron in linea_limpia for patron in patrones_inicio):
-            inicio_idx = i
-            print(f"  Tabla encontrada en línea {i+1}")
+        for patron in patrones_inicio:
+            if patron in linea_limpia:
+                inicio_idx = i
+                separador_detectado = detectar_separador(linea)
+                print(f"  Tabla encontrada en línea {i+1}")
+                print(f"  Separador detectado: {repr(separador_detectado)}")
+                break
+        
+        if inicio_idx != -1:
             break
     
     if inicio_idx == -1:
         print("  No se encontró el inicio de la tabla")
+        print("  Buscando líneas que contengan 'ID Aclaración'...")
+        for i, linea in enumerate(lineas[:20]):
+            if 'ID Aclaración' in linea:
+                print(f"  Línea {i+1}: {linea[:100]}")
         return None
     
-    # Obtener encabezados
-    if '\t' in lineas[inicio_idx]:
-        encabezados = lineas[inicio_idx].split('\t')
-    else:
-        # Intentar separar por espacios múltiples
-        encabezados = re.split(r'\s{2,}', lineas[inicio_idx])
+    # Obtener encabezados usando el separador detectado
+    encabezados = procesar_linea_con_separador(lineas[inicio_idx], separador_detectado)
     
     # Si no tenemos suficientes encabezados, usar los predeterminados
     if len(encabezados) < 11:
+        print(f"  Sólo se encontraron {len(encabezados)} encabezados, usando predeterminados")
         encabezados = [
             'ID Aclaración', 'Registro', 'Folio', 'CIS', 'Fecha Creación',
             'Fecha Enviado', 'Fecha Asignacion', 'Fecha Atendido', 
             'Estado Actual', 'Intentos', 'Acciones'
         ]
+    else:
+        print(f"  {len(encabezados)} encabezados detectados")
     
     # Recopilar filas de datos
     datos = []
@@ -120,22 +162,49 @@ def extraer_tabla_aclarapp(texto):
         
         # Detener si encontramos el final
         if 'Mostrando' in linea or 'Mostrar' in linea or not linea:
+            print(f"  Fin de tabla detectado en línea {i+1}")
             break
         
-        # Separar la fila
-        if '\t' in linea:
-            fila = linea.split('\t')
-        else:
-            # Usar regex para separar por 2 o más espacios
-            fila = re.split(r'\s{2,}', linea)
+        # Verificar si es una línea de datos (debe tener varios campos)
+        if len(linea) < 20:  # Línea muy corta probablemente no sea datos
+            continue
         
-        # Asegurar que tenga 11 columnas
-        if len(fila) >= 11:
+        # Procesar la línea con el separador detectado
+        fila = procesar_linea_con_separador(lineas[i], separador_detectado)
+        
+        # Asegurar que tenga al menos 10 columnas (Acciones puede estar vacía)
+        if len(fila) >= 10:
+            # Si tiene exactamente 10, agregar campo vacío para Acciones
+            if len(fila) == 10:
+                fila.append('')
+            datos.append(fila[:11])
+        elif len(fila) >= 8:  # Intentar con menos columnas
+            print(f"  Advertencia: Línea {i+1} tiene sólo {len(fila)} columnas: {fila[:3]}...")
+            # Rellenar con valores vacíos
+            while len(fila) < 11:
+                fila.append('')
             datos.append(fila[:11])
     
     if datos:
         print(f"  {len(datos)} filas extraídas")
-        return pd.DataFrame(datos, columns=encabezados[:11])
+        
+        # Crear DataFrame
+        try:
+            df = pd.DataFrame(datos, columns=encabezados[:11])
+            print(f"  DataFrame creado: {len(df)} filas x {len(df.columns)} columnas")
+            return df
+        except Exception as e:
+            print(f"  Error creando DataFrame: {e}")
+            print(f"  Número de encabezados: {len(encabezados)}")
+            print(f"  Número de columnas en datos: {len(datos[0]) if datos else 0}")
+            
+            # Intentar con columnas genéricas si hay error
+            if datos:
+                columnas_genericas = [f'Columna_{i+1}' for i in range(len(datos[0]))]
+                df = pd.DataFrame(datos, columns=columnas_genericas)
+                print(f"  DataFrame creado con columnas genéricas")
+                return df
+            return None
     else:
         print("  No se extrajeron datos")
         return None
@@ -157,6 +226,8 @@ def procesar_aclarapp():
             with open(RUTA_ACLARAPP, 'r', encoding='utf-8') as f:
                 contenido = f.read()
             
+            print(f"  Tamaño del archivo: {len(contenido)} caracteres")
+            
             # Extraer tabla
             df = extraer_tabla_aclarapp(contenido)
             
@@ -175,6 +246,10 @@ def procesar_aclarapp():
                 return df
             else:
                 print("  ✗ No se pudo extraer la tabla")
+                print("  Mostrando primeras 10 líneas del archivo:")
+                lineas = contenido.split('\n')
+                for i, linea in enumerate(lineas[:10]):
+                    print(f"  {i+1:3}: {linea[:100]}")
                 return None
                 
         except Exception as e:
@@ -188,9 +263,9 @@ def procesar_aclarapp():
 # ==================== FUNCIÓN PRINCIPAL ====================
 def main():
     """Ejecuta todo el proceso"""
-    print("=" * 50)
+    print("=" * 60)
     print("SISTEMA DE REPORTES - ACLARABOT Y ACLARAPP")
-    print("=" * 50)
+    print("=" * 60)
     
     # Procesar Aclarabot
     archivo_aclarabot = procesar_aclarabot()
@@ -198,15 +273,16 @@ def main():
     # Procesar Aclarapp
     df_aclarapp = procesar_aclarapp()
     
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 60)
     print("RESUMEN DEL PROCESO")
-    print("=" * 50)
+    print("=" * 60)
     
     if archivo_aclarabot:
         print(f"✓ Aclarabot: {archivo_aclarabot}")
     
     if df_aclarapp is not None:
         print(f"✓ Aclarapp: {len(df_aclarapp)} filas procesadas")
+        print(f"  Archivo limpio guardado como: TablaCopiadaDeAclarapp_LIMPIADO.csv")
     
     print("\n✅ Proceso completado")
 
