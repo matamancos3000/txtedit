@@ -138,11 +138,31 @@ def extraer_tabla_desde_texto(texto):
 def procesar_aclarabot():
     print("\n=== Procesando ACLARABOT ===")
 
+    # =====================================================
+    # ELIMINAR TODOS LOS CSV DEL DIRECTORIO DESTINO
+    # =====================================================
+    try:
+        if not os.path.exists(RUTA_DESTINO):
+            os.makedirs(RUTA_DESTINO)
+        else:
+            for archivo in os.listdir(RUTA_DESTINO):
+                ruta_archivo = os.path.join(RUTA_DESTINO, archivo)
+                # Asegurarnos de no borrar carpetas (especialmente Copy-Aclarapp)
+                if os.path.isfile(ruta_archivo) and archivo.lower().endswith(".csv"):
+                    try:
+                        os.remove(ruta_archivo)
+                        print(f"  - Eliminado: {archivo}")
+                    except Exception as e:
+                        print(f"  ✗ Error al eliminar {archivo}: {e}")
+    except Exception as e:
+        print(f"✗ Error accediendo a {RUTA_DESTINO}: {e}")
+        # Si falla el borrado/creación, continuamos para intentar generar el archivo nuevo
+
+    # =====================================================
+    # CONTINÚA EL PROCESAMIENTO NORMAL
+    # =====================================================
     hoy = datetime.now()
     archivo_salida = os.path.join(RUTA_DESTINO, hoy.strftime("%d-%b") + ".csv")
-
-    if not os.path.exists(RUTA_DESTINO):
-        os.makedirs(RUTA_DESTINO)
 
     frames = []
 
@@ -170,8 +190,11 @@ def procesar_aclarabot():
 
     if frames:
         df_final = pd.concat(frames, ignore_index=True)
-        df_final.to_csv(archivo_salida, index=False, encoding="utf-8-sig")
-        print(f"\n✓ Guardado: {archivo_salida}")
+        try:
+            df_final.to_csv(archivo_salida, index=False, encoding="utf-8-sig")
+            print(f"\n✓ Guardado: {archivo_salida}")
+        except Exception as e:
+            print(f"\n✗ Error al guardar {archivo_salida}: {e}")
     else:
         print("\n✗ No se procesó ningún entorno.")
 
