@@ -1,62 +1,63 @@
 import os, pandas as pd
-from datetime import datetime
-import chardet
 
-# Configuración
-RUTA_BASE = "../Carpeta/Aclarabot"
-DESTINO = "c:/Copia-reporte-Aclarabot"
-ACLARAPP = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv"
-ENTORNOS = ["DEV", "UAT", "PROD"]
+def limpiar_tabla_aclarapp(archivo_entrada, archivo_salida=None):
+    """Limpia el archivo copiado de la web y extrae solo la tabla"""
+    
+    # Leer como texto
+    with open(archivo_entrada, 'r', encoding='utf-8') as f:
+        texto = f.read()
+    
+    # Dividir en líneas
+    lineas = [l.strip() for l in texto.split('\n') if l.strip()]
+    
+    # Buscar inicio de tabla (ID Aclaración)
+    start = -1
+    for i, linea in enumerate(lineas):
+        if 'ID Aclaración' in linea:
+            start = i
+            break
+    
+    if start == -1:
+        print("❌ No se encontró la tabla")
+        return None
+    
+    # Los encabezados (asumiendo formato)
+    headers = ['ID Aclaración', 'Registro', 'Folio', 'CIS', 'Fecha Creación',
+               'Fecha Enviado', 'Fecha Asignacion', 'Fecha Atendido',
+               'Estado Actual', 'Intentos', 'Acciones']
+    
+    # Recoger datos
+    datos = []
+    for i in range(start+1, len(lineas)):
+        if 'Mostrando' in lineas[i]:
+            break
+        
+        # Separar por tabs o espacios múltiples
+        if '\t' in lineas[i]:
+            fila = lineas[i].split('\t')
+        else:
+            # Para espacios múltiples
+            fila = [x for x in lineas[i].split('  ') if x]
+        
+        if len(fila) >= 11:
+            datos.append(fila[:11])
+    
+    # Crear DataFrame
+    df = pd.DataFrame(datos, columns=headers)
+    
+    # Guardar
+    if archivo_salida:
+        os.makedirs(os.path.dirname(archivo_salida), exist_ok=True)
+        df.to_csv(archivo_salida, index=False, encoding='utf-8-sig')
+        print(f"✅ Tabla guardada: {archivo_salida} ({len(df)} filas)")
+    
+    return df
 
-# Crear carpeta si no existe
-def crear_dir(ruta):
-    if not os.path.exists(ruta): os.makedirs(ruta)
+# Uso simple:
+ruta_original = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv"
+ruta_limpia = ruta_original.replace('.csv', '_LIMPIADO.csv')
 
-# Detectar encoding
-def get_encoding(archivo):
-    try:
-        with open(archivo, 'rb') as f:
-            return chardet.detect(f.read(5000))['encoding'] or 'utf-8'
-    except:
-        return 'utf-8'
-
-# Procesar Aclarabot
-print("🚀 Procesando Aclarabot...")
-crear_dir(DESTINO)
-ahora = datetime.now()
-archivo_final = f"{DESTINO}/{ahora.strftime('%d')}-{ahora.strftime('%b')}.csv"
-
-datos = []
-for env in ENTORNOS:
-    ruta = f"{RUTA_BASE}/{env}/Log/{ahora.year}/{ahora.strftime('%m')}/Log.csv"
-    if os.path.exists(ruta):
-        try:
-            df = pd.read_csv(ruta, encoding=get_encoding(ruta), 
-                           usecols=range(12), on_bad_lines='skip', engine='python')
-            df.insert(0, 'ENTORNO', env)
-            datos.append(df)
-            print(f"  ✅ {env}: {len(df)} filas")
-        except:
-            print(f"  ❌ {env}: Error")
-    else:
-        print(f"  ⚠️  {env}: No encontrado")
-
-if datos:
-    pd.concat(datos).to_csv(archivo_final, index=False, encoding='utf-8-sig')
-    print(f"📊 Guardado: {archivo_final}")
-
-# Procesar Aclarapp
-print("\n📱 Procesando Aclarapp...")
-crear_dir(os.path.dirname(ACLARAPP))
-if os.path.exists(ACLARAPP):
-    try:
-        df = pd.read_csv(ACLARAPP, encoding=get_encoding(ACLARAPP),
-                       usecols=range(13), on_bad_lines='skip', engine='python')
-        print(f"  ✅ {len(df)} filas")
-    except:
-        print("  ❌ Error leyendo archivo")
-else:
-    pd.DataFrame(columns=[f"Col_{i}" for i in range(13)]).to_csv(ACLARAPP, index=False)
-    print("  📄 Archivo vacío creado")
-
-print("\n✅ Proceso terminado")
+df = limpiar_tabla_aclarapp(ruta_original, ruta_limpia)
+if df is not None:
+    print("\nPrimeras filas:")
+    print(df.head())
