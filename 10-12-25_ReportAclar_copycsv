@@ -1,4 +1,5 @@
-import os, pandas as pd
+import os
+import pandas as pd
 from datetime import datetime
 import chardet
 
@@ -8,55 +9,94 @@ DESTINO = "c:/Copia-reporte-Aclarabot"
 ACLARAPP = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv"
 ENTORNOS = ["DEV", "UAT", "PROD"]
 
-# Crear carpeta si no existe
+# Crear carpeta
 def crear_dir(ruta):
-    if not os.path.exists(ruta): os.makedirs(ruta)
+    if not os.path.exists(ruta):
+        os.makedirs(ruta)
 
 # Detectar encoding
 def get_encoding(archivo):
     try:
-        with open(archivo, 'rb') as f:
-            return chardet.detect(f.read(5000))['encoding'] or 'utf-8'
+        with open(archivo, "rb") as f:
+            enc = chardet.detect(f.read(5000))["encoding"]
+            return enc or "utf-8"
     except:
-        return 'utf-8'
+        return "utf-8"
 
-# Procesar Aclarabot
+# Buscar Log.csv con may/min
+def buscar_log(ruta_folder):
+    nombres = ["Log.csv", "log.csv", "LOG.csv"]
+    for nombre in nombres:
+        ruta = os.path.join(ruta_folder, nombre)
+        if os.path.exists(ruta):
+            return ruta
+    return None
+
+# Proceso Aclarabot
 print("🚀 Procesando Aclarabot...")
+
 crear_dir(DESTINO)
+
+# Eliminar todos los CSV antes de crear uno nuevo
+for file in os.listdir(DESTINO):
+    if file.lower().endswith(".csv"):
+        os.remove(os.path.join(DESTINO, file))
+
 ahora = datetime.now()
 archivo_final = f"{DESTINO}/{ahora.strftime('%d')}-{ahora.strftime('%b')}.csv"
 
+year = ahora.year
+mes = ahora.strftime("%m")
+
 datos = []
+
 for env in ENTORNOS:
-    ruta = f"{RUTA_BASE}/{env}/Log/{ahora.year}/{ahora.strftime('%m')}/Log.csv"
-    if os.path.exists(ruta):
+    ruta_folder = f"{RUTA_BASE}/{env}/Log/{year}/{mes}"
+    ruta = buscar_log(ruta_folder)
+
+    if ruta:
         try:
-            df = pd.read_csv(ruta, encoding=get_encoding(ruta), 
-                           usecols=range(12), on_bad_lines='skip', engine='python')
-            df.insert(0, 'ENTORNO', env)
+            df = pd.read_csv(
+                ruta,
+                encoding=get_encoding(ruta),
+                usecols=range(12),
+                on_bad_lines="skip",
+                engine="python"
+            )
+            df.insert(0, "ENTORNO", env)
             datos.append(df)
             print(f"  ✅ {env}: {len(df)} filas")
-        except:
-            print(f"  ❌ {env}: Error")
+        except Exception as e:
+            print(f"  ❌ {env}: Error -> {e}")
     else:
-        print(f"  ⚠️  {env}: No encontrado")
+        print(f"  ⚠️ {env}: No encontrado")
 
+# Guardar final
 if datos:
-    pd.concat(datos).to_csv(archivo_final, index=False, encoding='utf-8-sig')
+    final = pd.concat(datos, ignore_index=True)
+    final.to_csv(archivo_final, index=False, encoding="utf-8-sig")
     print(f"📊 Guardado: {archivo_final}")
 
 # Procesar Aclarapp
 print("\n📱 Procesando Aclarapp...")
 crear_dir(os.path.dirname(ACLARAPP))
+
 if os.path.exists(ACLARAPP):
     try:
-        df = pd.read_csv(ACLARAPP, encoding=get_encoding(ACLARAPP),
-                       usecols=range(13), on_bad_lines='skip', engine='python')
+        df = pd.read_csv(
+            ACLARAPP,
+            encoding=get_encoding(ACLARAPP),
+            usecols=range(13),
+            on_bad_lines="skip",
+            engine="python"
+        )
         print(f"  ✅ {len(df)} filas")
-    except:
-        print("  ❌ Error leyendo archivo")
+    except Exception as e:
+        print(f"  ❌ Error leyendo archivo -> {e}")
 else:
-    pd.DataFrame(columns=[f"Col_{i}" for i in range(13)]).to_csv(ACLARAPP, index=False)
+    pd.DataFrame(columns=[f"Col_{i}" for i in range(13)]).to_csv(
+        ACLARAPP, index=False, encoding="utf-8-sig"
+    )
     print("  📄 Archivo vacío creado")
 
 print("\n✅ Proceso terminado")
