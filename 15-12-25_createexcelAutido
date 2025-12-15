@@ -57,4 +57,132 @@ COLUMNAS_AUDITORIA = [
 ]
 
 # =========================
-#
+# ESTILOS (MODIFICABLES)
+# =========================
+HEADER_FILL_COLOR = "FF0000"   # Rojo
+HEADER_FONT_COLOR = "FFFFFF"   # Blanco
+FONT_NAME = "Calibri"
+
+# =========================
+# FUNCIÓN PRINCIPAL
+# =========================
+def generar_reporte_auditoria():
+    logger.info("🚀 Generando reporte para Auditoría")
+
+    if not INPUT_EXCEL.exists():
+        raise FileNotFoundError(f"No se encontró el archivo base: {INPUT_EXCEL}")
+
+    # =========================
+    # 1. LEER EXCEL BASE
+    # =========================
+    df = pd.read_excel(
+        INPUT_EXCEL,
+        sheet_name=SHEET_INPUT,
+        dtype=str
+    )
+
+    logger.info(f"Registros cargados: {len(df)}")
+
+    # =========================
+    # 2. ELIMINAR DUPLICADOS
+    # =========================
+    df = df.drop_duplicates(subset=["AclaracionID"])
+    logger.info(f"Registros tras eliminar duplicados: {len(df)}")
+
+    # =========================
+    # 3. ELIMINAR NOMBRE VACÍO
+    # =========================
+    df["NOMBRE"] = df["NOMBRE"].str.strip()
+    df = df[df["NOMBRE"].notna() & (df["NOMBRE"] != "")]
+    logger.info(f"Registros con agente válido: {len(df)}")
+
+    # =========================
+    # 4. SELECCIONAR COLUMNAS
+    # =========================
+    df = df[COLUMNAS_AUDITORIA]
+
+    # =========================
+    # 5. CONVERTIR FECHA
+    # =========================
+    df["Fecha"] = pd.to_datetime(
+        df["Fecha"],
+        format="%d/%m/%Y %H:%M",
+        errors="coerce"
+    )
+
+    # =========================
+    # 6. ORDENAR POR FECHA
+    # =========================
+    df = df.sort_values(by="Fecha", ascending=True)
+
+    # Eliminar columna técnica
+    df = df.drop(columns=["AclaracionID"])
+
+    # =========================
+    # 7. EXPORTAR A EXCEL
+    # =========================
+    OUTPUT_EXCEL.parent.mkdir(parents=True, exist_ok=True)
+
+    with pd.ExcelWriter(
+        OUTPUT_EXCEL,
+        engine="openpyxl"
+    ) as writer:
+        df.to_excel(
+            writer,
+            sheet_name=SHEET_OUTPUT,
+            index=False
+        )
+
+        ws = writer.book[SHEET_OUTPUT]
+
+        # =========================
+        # 8. ESTILOS DE ENCABEZADO
+        # =========================
+        header_font = Font(
+            name=FONT_NAME,
+            bold=True,
+            color=HEADER_FONT_COLOR
+        )
+        header_fill = PatternFill(
+            start_color=HEADER_FILL_COLOR,
+            end_color=HEADER_FILL_COLOR,
+            fill_type="solid"
+        )
+
+        for cell in ws[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+
+        # =========================
+        # 9. FORMATO FECHA CORTA
+        # =========================
+        for cell in ws["A"][1:]:
+            cell.number_format = "DD/MM/YYYY"
+
+        # =========================
+        # 10. AUTOAJUSTAR ANCHO
+        # =========================
+        for col in ws.columns:
+            max_length = 0
+            col_letter = get_column_letter(col[0].column)
+
+            for cell in col:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+
+            ws.column_dimensions[col_letter].width = max_length + 2
+
+    logger.info("✅ Reporte de Auditoría generado correctamente")
+    logger.info(f"📄 Archivo: {OUTPUT_EXCEL.name}")
+    logger.info(f"📊 Total registros finales: {len(df)}")
+
+
+# =========================
+# EJECUCIÓN
+# =========================
+if __name__ == "__main__":
+    try:
+        generar_reporte_auditoria()
+    except Exception as e:
+        logger.error(f"❌ Error: {e}")
+        raise
