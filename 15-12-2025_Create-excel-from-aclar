@@ -1,0 +1,104 @@
+import os
+import pandas as pd
+from datetime import datetime
+
+# =========================
+# CONFIGURACIÓN GENERAL
+# =========================
+BASE_PATH = "c:/Copia-reporte-Aclarabot"
+
+ACLARAPP_PATH = os.path.join(
+    BASE_PATH,
+    "Copy-Aclarapp",
+    "TablaCopiadaDeAclarapp.csv"
+)
+
+# Carpeta con fecha completa (día-mes-año)
+FECHA_CARPETA = datetime.now().strftime("%d-%b-%Y")
+
+# Nombre del archivo solo mes-año
+MES_ANIO = datetime.now().strftime("%b-%Y")
+
+OUTPUT_FOLDER = os.path.join(
+    BASE_PATH,
+    "Reporte_Excel",
+    FECHA_CARPETA
+)
+
+OUTPUT_FILE = os.path.join(
+    OUTPUT_FOLDER,
+    f"{MES_ANIO}.xlsx"
+)
+
+# =========================
+# 1. LEER LOGS PRINCIPALES
+# =========================
+logs_dfs = []
+
+for file in os.listdir(BASE_PATH):
+    if file.lower().endswith(".csv"):
+        file_path = os.path.join(BASE_PATH, file)
+
+        # Solo archivos en la carpeta raíz (no subcarpetas)
+        if os.path.isfile(file_path):
+            df = pd.read_csv(
+                file_path,
+                sep=",",
+                encoding="utf-8-sig"
+            )
+            logs_dfs.append(df)
+
+if not logs_dfs:
+    raise Exception("❌ No se encontraron archivos CSV en la carpeta principal.")
+
+logs_df = pd.concat(logs_dfs, ignore_index=True)
+
+# =========================
+# 2. LEER ARCHIVO ACLARAPP
+# =========================
+aclarapp_df = pd.read_csv(
+    ACLARAPP_PATH,
+    sep="|",
+    encoding="utf-8-sig"
+)
+
+# =========================
+# 3. LIMPIEZA DE NOMBRES
+# =========================
+logs_df.columns = logs_df.columns.str.strip()
+aclarapp_df.columns = aclarapp_df.columns.str.strip()
+
+# =========================
+# 4. CRUCE DE INFORMACIÓN
+# =========================
+df_final = logs_df.merge(
+    aclarapp_df,
+    how="left",
+    left_on="AclaracionID",
+    right_on="ID Aclaración",
+    suffixes=("", "_DUP")
+)
+
+# =========================
+# 5. ELIMINAR COLUMNAS DUPLICADAS
+# =========================
+duplicadas = [col for col in df_final.columns if col.endswith("_DUP")]
+df_final.drop(columns=duplicadas, inplace=True)
+
+# =========================
+# 6. CREAR CARPETA DESTINO
+# =========================
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+# =========================
+# 7. EXPORTAR A EXCEL
+# =========================
+df_final.to_excel(
+    OUTPUT_FILE,
+    index=False,
+    engine="openpyxl"
+)
+
+print("✅ Reporte generado correctamente")
+print(f"📂 Carpeta: {OUTPUT_FOLDER}")
+print(f"📄 Archivo: {OUTPUT_FILE}")
