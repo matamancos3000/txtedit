@@ -133,4 +133,89 @@ agentes_df = normalizar_columnas(agentes_df)
 # =========================
 # 6. MERGE CON AGENTES (SEGURO)
 # =========================
-col_registro = buscar_columna(d
+col_registro = buscar_columna(df_merge, ["numeroderegistro"])
+col_agente = buscar_columna(agentes_df, ["id"])
+
+if col_registro and col_agente:
+    df_final = df_merge.merge(
+        agentes_df,
+        how="left",
+        left_on=col_registro,
+        right_on=col_agente,
+        suffixes=("", "_agentedup")
+    )
+    df_final.drop(
+        columns=[c for c in df_final.columns if c.endswith("_agentedup")],
+        inplace=True
+    )
+else:
+    print("⚠️ Merge Agentes omitido (columnas no encontradas)")
+    df_final = df_merge.copy()
+
+# =========================
+# 7. TRANSFORMACIONES
+# =========================
+# Estatus
+col_estatus = buscar_columna(df_final, ["estatus"])
+if col_estatus:
+    df_final[col_estatus] = (
+        df_final[col_estatus]
+        .astype(str)
+        .str.upper()
+        .apply(
+            lambda x: "Exitoso" if "VERDADERO" in x or "TRUE" in x
+            else "Error" if "FALSO" in x or "FALSE" in x
+            else x
+        )
+    )
+
+# Folio texto
+col_folio = buscar_columna(df_final, ["folio"])
+if col_folio:
+    df_final[col_folio] = df_final[col_folio].astype(str)
+
+# Folio SCC con 00
+col_folio_scc = buscar_columna(df_final, ["folioscc"])
+if col_folio_scc:
+    df_final[col_folio_scc] = (
+        df_final[col_folio_scc]
+        .astype(str)
+        .apply(lambda x: f"00{x}" if x.lower() != "nan" else x)
+    )
+
+# Fechas aclarapp
+df_final = convertir_fechas_simples(
+    df_final,
+    [
+        buscar_columna(df_final, ["fechacreacion"]),
+        buscar_columna(df_final, ["fechaenviado"]),
+        buscar_columna(df_final, ["fechaasignacion"]),
+        buscar_columna(df_final, ["fechaatendido"]),
+    ]
+)
+
+# =========================
+# 8. NO ENCONTRADO
+# =========================
+df_final.fillna("No encontrado", inplace=True)
+
+# =========================
+# 9. ORDENAR POR FECHA
+# =========================
+if col_fecha:
+    df_final.sort_values(by=col_fecha, ascending=True, inplace=True)
+
+# =========================
+# 10. EXPORTAR EXCEL
+# =========================
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+df_final.to_excel(
+    OUTPUT_FILE,
+    index=False,
+    engine="openpyxl"
+)
+
+print("✅ REPORTE GENERADO CORRECTAMENTE")
+print(f"📂 Carpeta: {OUTPUT_FOLDER}")
+print(f"📄 Archivo: {OUTPUT_FILE}")
