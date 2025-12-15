@@ -13,16 +13,19 @@ ACLARAPP_PATH = os.path.join(
     "TablaCopiadaDeAclarapp.csv"
 )
 
-# Carpeta con fecha completa (día-mes-año)
-FECHA_CARPETA = datetime.now().strftime("%d-%b-%Y")
+AGENTES_PATH = os.path.join(
+    BASE_PATH,
+    "Copy-Aclarapp",
+    "InfoAgentes.csv"
+)
 
-# Nombre del archivo solo mes-año
+# Mes-año para carpeta y archivo
 MES_ANIO = datetime.now().strftime("%b-%Y")
 
 OUTPUT_FOLDER = os.path.join(
     BASE_PATH,
     "Reporte_Excel",
-    FECHA_CARPETA
+    MES_ANIO
 )
 
 OUTPUT_FILE = os.path.join(
@@ -39,7 +42,6 @@ for file in os.listdir(BASE_PATH):
     if file.lower().endswith(".csv"):
         file_path = os.path.join(BASE_PATH, file)
 
-        # Solo archivos en la carpeta raíz (no subcarpetas)
         if os.path.isfile(file_path):
             df = pd.read_csv(
                 file_path,
@@ -52,6 +54,7 @@ if not logs_dfs:
     raise Exception("❌ No se encontraron archivos CSV en la carpeta principal.")
 
 logs_df = pd.concat(logs_dfs, ignore_index=True)
+logs_df.columns = logs_df.columns.str.strip()
 
 # =========================
 # 2. LEER ARCHIVO ACLARAPP
@@ -62,16 +65,12 @@ aclarapp_df = pd.read_csv(
     encoding="utf-8-sig"
 )
 
-# =========================
-# 3. LIMPIEZA DE NOMBRES
-# =========================
-logs_df.columns = logs_df.columns.str.strip()
 aclarapp_df.columns = aclarapp_df.columns.str.strip()
 
 # =========================
-# 4. CRUCE DE INFORMACIÓN
+# 3. CRUCE LOGS + ACLARAPP
 # =========================
-df_final = logs_df.merge(
+df_merge_1 = logs_df.merge(
     aclarapp_df,
     how="left",
     left_on="AclaracionID",
@@ -79,11 +78,35 @@ df_final = logs_df.merge(
     suffixes=("", "_DUP")
 )
 
+# Eliminar columnas duplicadas
+dup_cols_1 = [c for c in df_merge_1.columns if c.endswith("_DUP")]
+df_merge_1.drop(columns=dup_cols_1, inplace=True)
+
 # =========================
-# 5. ELIMINAR COLUMNAS DUPLICADAS
+# 4. LEER ARCHIVO AGENTES
 # =========================
-duplicadas = [col for col in df_final.columns if col.endswith("_DUP")]
-df_final.drop(columns=duplicadas, inplace=True)
+agentes_df = pd.read_csv(
+    AGENTES_PATH,
+    sep="|",
+    encoding="utf-8-sig"
+)
+
+agentes_df.columns = agentes_df.columns.str.strip()
+
+# =========================
+# 5. CRUCE CON AGENTES
+# =========================
+df_final = df_merge_1.merge(
+    agentes_df,
+    how="left",
+    left_on="Numero de registro",
+    right_on="ID",
+    suffixes=("", "_AGENTE_DUP")
+)
+
+# Eliminar columnas duplicadas del cruce de agentes
+dup_cols_2 = [c for c in df_final.columns if c.endswith("_AGENTE_DUP")]
+df_final.drop(columns=dup_cols_2, inplace=True)
 
 # =========================
 # 6. CREAR CARPETA DESTINO
