@@ -2,6 +2,7 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 import logging
+from openpyxl.styles import Font, PatternFill, Alignment
 
 # =========================
 # CONFIGURACIÓN DE LOGGING
@@ -37,7 +38,9 @@ OUTPUT_EXCEL = (
 SHEET_INPUT = "Reporte_Completo"
 SHEET_OUTPUT = "Reporte Aclarapp"
 
-# Columnas para auditoría (orden final)
+# =========================
+# COLUMNAS AUDITORÍA
+# =========================
 COLUMNAS_AUDITORIA = [
     "Fecha",
     "Tipo de tarjeta",
@@ -48,8 +51,22 @@ COLUMNAS_AUDITORIA = [
     "Site",
     "Folio",
     "CIS",
-    "Cargos"
+    "Cargos",
+    "AclaracionID"
 ]
+
+# =========================
+# ESTILOS (MODIFICABLES)
+# =========================
+HEADER_FILL_COLOR = "FF0000"   # Rojo
+HEADER_FONT_COLOR = "FFFFFF"   # Blanco
+FONT_NAME = "Calibri"
+
+ALIGNMENT_GENERAL = Alignment(
+    horizontal="center",
+    vertical="center",
+    wrap_text=True
+)
 
 # =========================
 # FUNCIÓN PRINCIPAL
@@ -72,43 +89,54 @@ def generar_reporte_auditoria():
     logger.info(f"Registros cargados: {len(df)}")
 
     # =========================
-    # 2. VALIDAR COLUMNAS
+    # 2. ELIMINAR DUPLICADOS
     # =========================
-    columnas_faltantes = [c for c in COLUMNAS_AUDITORIA if c not in df.columns]
+    df = df.drop_duplicates(subset=["AclaracionID"])
+    logger.info(f"Registros tras eliminar duplicados: {len(df)}")
 
-    if columnas_faltantes:
-        raise ValueError(f"Faltan columnas requeridas: {columnas_faltantes}")
+    # =========================
+    # 3. ELIMINAR NOMBRE VACÍO
+    # =========================
+    df["NOMBRE"] = df["NOMBRE"].str.strip()
+    df = df[df["NOMBRE"].notna() & (df["NOMBRE"] != "")]
+    logger.info(f"Registros con agente válido: {len(df)}")
 
+    # =========================
+    # 4. SELECCIONAR COLUMNAS
+    # =========================
     df = df[COLUMNAS_AUDITORIA]
 
     # =========================
-    # 3. CONVERSIÓN DE FECHA
+    # 5. CONVERTIR FECHA
     # =========================
     df["Fecha"] = pd.to_datetime(
         df["Fecha"],
-        format="%d/%m/%Y %I:%M:%S %p",
+        format="%d/%m/%Y %H:%M",
         errors="coerce"
     )
 
     # =========================
-    # 4. FORMATO DE FOLIO (TEXTO)
+    # 6. FOLIO COMO TEXTO
     # =========================
     df["Folio"] = df["Folio"].astype(str)
 
     # =========================
-    # 5. ORDENAR POR FECHA
+    # 7. ORDENAR POR FECHA
     # =========================
     df = df.sort_values(by="Fecha", ascending=True)
 
+    # Ya no necesitamos AclaracionID en el Excel final
+    df = df.drop(columns=["AclaracionID"])
+
     # =========================
-    # 6. EXPORTAR A EXCEL
+    # 8. EXPORTAR A EXCEL
     # =========================
     OUTPUT_EXCEL.parent.mkdir(parents=True, exist_ok=True)
 
     with pd.ExcelWriter(
         OUTPUT_EXCEL,
         engine="openpyxl",
-        datetime_format="DD/MM/YYYY HH:MM:SS"
+        datetime_format="DD/MM/YYYY HH:MM"
     ) as writer:
         df.to_excel(
             writer,
@@ -116,9 +144,35 @@ def generar_reporte_auditoria():
             index=False
         )
 
+        ws = writer.book[SHEET_OUTPUT]
+
+        # =========================
+        # 9. APLICAR ESTILOS
+        # =========================
+        header_font = Font(
+            name=FONT_NAME,
+            bold=True,
+            color=HEADER_FONT_COLOR
+        )
+        header_fill = PatternFill(
+            start_color=HEADER_FILL_COLOR,
+            end_color=HEADER_FILL_COLOR,
+            fill_type="solid"
+        )
+
+        for cell in ws[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = ALIGNMENT_GENERAL
+
+        for row in ws.iter_rows(min_row=2):
+            for cell in row:
+                cell.font = Font(name=FONT_NAME)
+                cell.alignment = ALIGNMENT_GENERAL
+
     logger.info("✅ Reporte de Auditoría generado correctamente")
     logger.info(f"📄 Archivo: {OUTPUT_EXCEL.name}")
-    logger.info(f"📊 Total registros: {len(df)}")
+    logger.info(f"📊 Total registros finales: {len(df)}")
 
 
 # =========================
