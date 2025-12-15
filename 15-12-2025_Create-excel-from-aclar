@@ -1,40 +1,61 @@
 import os
 import pandas as pd
 from datetime import datetime
+import unicodedata
 
 # =========================
 # CONFIGURACIÓN GENERAL
 # =========================
 BASE_PATH = "c:/Copia-reporte-Aclarabot"
 
-ACLARAPP_PATH = os.path.join(BASE_PATH, "Copy-Aclarapp", "TablaCopiadaDeAclarapp.csv")
-AGENTES_PATH = os.path.join(BASE_PATH, "Copy-Aclarapp", "InfoAgentes.csv")
+ACLARAPP_PATH = os.path.join(
+    BASE_PATH, "Copy-Aclarapp", "TablaCopiadaDeAclarapp.csv"
+)
+AGENTES_PATH = os.path.join(
+    BASE_PATH, "Copy-Aclarapp", "InfoAgentes.csv"
+)
 
 MES_ANIO = datetime.now().strftime("%b-%Y")
 
-OUTPUT_FOLDER = os.path.join(BASE_PATH, "Reporte_Excel", MES_ANIO)
-OUTPUT_FILE = os.path.join(OUTPUT_FOLDER, f"{MES_ANIO}.xlsx")
+OUTPUT_FOLDER = os.path.join(
+    BASE_PATH, "Reporte_Excel", MES_ANIO
+)
+OUTPUT_FILE = os.path.join(
+    OUTPUT_FOLDER, f"{MES_ANIO}.xlsx"
+)
 
 # =========================
-# FUNCIONES UTILITARIAS
+# FUNCIONES DE BLINDAJE
 # =========================
 def leer_csv_flexible(path):
+    """Detecta automáticamente | o ,"""
     try:
         return pd.read_csv(path, sep="|", encoding="utf-8-sig")
     except:
         return pd.read_csv(path, sep=",", encoding="utf-8-sig")
 
 
+def normalizar_texto(texto):
+    texto = str(texto).strip().lower()
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = texto.replace(" ", "")
+    return texto
+
+
 def normalizar_columnas(df):
-    df.columns = df.columns.str.strip()
+    df.columns = [normalizar_texto(c) for c in df.columns]
     return df
 
 
-def convertir_fecha_personalizada(df, columna):
-    """
-    Convierte fechas con formato:
-    dd/MM/yyyy hh:mm:ss AM/PM
-    """
+def buscar_columna(df, posibles):
+    for col in df.columns:
+        if col in posibles:
+            return col
+    return None
+
+
+def convertir_fecha_logs(df, columna):
     if columna in df.columns:
         df[columna] = pd.to_datetime(
             df[columna],
@@ -44,7 +65,7 @@ def convertir_fecha_personalizada(df, columna):
     return df
 
 
-def convertir_fecha_simple(df, columnas):
+def convertir_fechas_simples(df, columnas):
     for col in columnas:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce").dt.date
@@ -64,12 +85,16 @@ for file in os.listdir(BASE_PATH):
             df = normalizar_columnas(df)
             logs_dfs.append(df)
 
+if not logs_dfs:
+    raise Exception("❌ No se encontraron CSV de logs.")
+
 logs_df = pd.concat(logs_dfs, ignore_index=True)
 
 # =========================
-# 2. FECHA PRINCIPAL + ORDEN
+# 2. FECHA + ORDEN
 # =========================
-logs_df = convertir_fecha_personalizada(logs_df, "Fecha")
+col_fecha = buscar_columna(logs_df, ["fecha"])
+logs_df = convertir_fecha_logs(logs_df, col_fecha)
 
 # =========================
 # 3. LEER ACLARAPP
@@ -78,17 +103,26 @@ aclarapp_df = leer_csv_flexible(ACLARAPP_PATH)
 aclarapp_df = normalizar_columnas(aclarapp_df)
 
 # =========================
-# 4. MERGE LOGS + ACLARAPP
+# 4. MERGE LOGS + ACLARAPP (SEGURO)
 # =========================
-df_merge = logs_df.merge(
-    aclarapp_df,
-    how="left",
-    left_on="AclaracionID",
-    right_on="ID Aclaración",
-    suffixes=("", "_DUP")
-)
+col_logs = buscar_columna(logs_df, ["aclaracionid"])
+col_aclarapp = buscar_columna(aclarapp_df, ["idaclaracion"])
 
-df_merge.drop(columns=[c for c in df_merge.columns if c.endswith("_DUP")], inplace=True)
+if col_logs and col_aclarapp:
+    df_merge = logs_df.merge(
+        aclarapp_df,
+        how="left",
+        left_on=col_logs,
+        right_on=col_aclarapp,
+        suffixes=("", "_dup")
+    )
+    df_merge.drop(
+        columns=[c for c in df_merge.columns if c.endswith("_dup")],
+        inplace=True
+    )
+else:
+    print("⚠️ Merge Aclarapp omitido (columnas no encontradas)")
+    df_merge = logs_df.copy()
 
 # =========================
 # 5. LEER AGENTES
@@ -97,71 +131,6 @@ agentes_df = leer_csv_flexible(AGENTES_PATH)
 agentes_df = normalizar_columnas(agentes_df)
 
 # =========================
-# 6. MERGE CON AGENTES
+# 6. MERGE CON AGENTES (SEGURO)
 # =========================
-df_final = df_merge.merge(
-    agentes_df,
-    how="left",
-    left_on="Numero de registro",
-    right_on="ID",
-    suffixes=("", "_AGENTE_DUP")
-)
-
-df_final.drop(columns=[c for c in df_final.columns if c.endswith("_AGENTE_DUP")], inplace=True)
-
-# =========================
-# 7. TRANSFORMACIONES
-# =========================
-
-# Estatus
-if "Estatus" in df_final.columns:
-    df_final["Estatus"] = (
-        df_final["Estatus"]
-        .astype(str)
-        .str.upper()
-        .apply(
-            lambda x: "Exitoso" if "VERDADERO" in x or "TRUE" in x
-            else "Error" if "FALSO" in x or "FALSE" in x
-            else x
-        )
-    )
-
-# Folio como texto
-if "Folio" in df_final.columns:
-    df_final["Folio"] = df_final["Folio"].astype(str)
-
-# Folio SCC con dos ceros al inicio
-if "Folio SCC" in df_final.columns:
-    df_final["Folio SCC"] = (
-        df_final["Folio SCC"]
-        .astype(str)
-        .apply(lambda x: f"00{x}" if x != "nan" else x)
-    )
-
-# Fechas de Aclarapp
-df_final = convertir_fecha_simple(
-    df_final,
-    ["Fecha Creación", "Fecha Enviado", "Fecha Asignacion", "Fecha Atendido"]
-)
-
-# =========================
-# 8. RELLENAR NO ENCONTRADO
-# =========================
-df_final.fillna("No encontrado", inplace=True)
-
-# =========================
-# 9. ORDENAR POR FECHA
-# =========================
-if "Fecha" in df_final.columns:
-    df_final.sort_values(by="Fecha", ascending=True, inplace=True)
-
-# =========================
-# 10. EXPORTAR
-# =========================
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-
-df_final.to_excel(OUTPUT_FILE, index=False, engine="openpyxl")
-
-print("✅ Reporte generado correctamente")
-print(f"📂 {OUTPUT_FOLDER}")
-print(f"📄 {OUTPUT_FILE}")
+col_registro = buscar_columna(d
