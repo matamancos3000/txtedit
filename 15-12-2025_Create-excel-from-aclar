@@ -21,12 +21,12 @@ class Config:
     BASE_PATH = Path("c:/Copia-reporte-Aclarabot")
     ACLARAPP_PATH = BASE_PATH / "Copy-Aclarapp" / "TablaCopiadaDeAclarapp.csv"
     AGENTES_PATH = BASE_PATH / "Copy-Aclarapp" / "InfoAgentes.csv"
-    
+
     # Mes-año para carpeta y archivo
     MES_ANIO = datetime.now().strftime("%b-%Y")
     OUTPUT_FOLDER = BASE_PATH / "Reporte_Excel" / MES_ANIO
     OUTPUT_FILE = OUTPUT_FOLDER / f"{MES_ANIO}.xlsx"
-    
+
     # Columnas esperadas para validación
     EXPECTED_LOG_COLUMNS = ['AclaracionID', 'Numero de registro']
     EXPECTED_ACLARAPP_COLUMNS = ['ID Aclaración']
@@ -36,56 +36,51 @@ class Config:
 # FUNCIONES AUXILIARES
 # =========================
 def validar_archivo(ruta_archivo, nombre_archivo):
-    """Valida que un archivo exista y sea accesible"""
     if not ruta_archivo.exists():
         raise FileNotFoundError(f"❌ No se encontró el archivo: {nombre_archivo}")
     if ruta_archivo.stat().st_size == 0:
         raise ValueError(f"❌ El archivo {nombre_archivo} está vacío")
     return True
 
+
 def cargar_csv_con_validacion(ruta_archivo, sep=',', encoding='utf-8-sig'):
-    """Carga un CSV con manejo de errores y limpieza de columnas"""
     try:
         df = pd.read_csv(
             ruta_archivo,
             sep=sep,
             encoding=encoding,
-            dtype=str,  # Mantener todo como string para evitar problemas de tipos
-            on_bad_lines='warn'  # Manejar líneas problemáticas
+            dtype=str,
+            on_bad_lines='warn'
         )
-        # Limpiar nombres de columnas
         df.columns = df.columns.str.strip()
-        # Eliminar espacios en blanco al inicio/final de celdas de texto
         df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
         return df
     except Exception as e:
         logger.error(f"Error al cargar {ruta_archivo.name}: {e}")
         raise
 
+
 def encontrar_columna_similar(df, columna_buscada):
-    """Busca columnas similares en caso de que el nombre no coincida exactamente"""
-    columnas_disponibles = df.columns.tolist()
     columna_buscada_lower = columna_buscada.lower()
-    
-    for col in columnas_disponibles:
+    for col in df.columns:
         if columna_buscada_lower in col.lower() or col.lower() in columna_buscada_lower:
             logger.warning(f"Usando columna '{col}' en lugar de '{columna_buscada}'")
             return col
     return None
 
+
 def eliminar_columnas_duplicadas(df, sufijo='_DUP'):
-    """Elimina columnas duplicadas que terminan con un sufijo específico"""
     columnas_a_eliminar = [c for c in df.columns if c.endswith(sufijo)]
     if columnas_a_eliminar:
         logger.info(f"Eliminando {len(columnas_a_eliminar)} columnas duplicadas")
         df.drop(columns=columnas_a_eliminar, inplace=True)
     return df
 
+
 def verificar_columnas_requeridas(df, columnas_requeridas, nombre_dataset):
-    """Verifica que un DataFrame tenga las columnas requeridas"""
     columnas_faltantes = []
     columnas_ajustadas = {}
-    
+
     for col in columnas_requeridas:
         if col not in df.columns:
             col_similar = encontrar_columna_similar(df, col)
@@ -93,191 +88,148 @@ def verificar_columnas_requeridas(df, columnas_requeridas, nombre_dataset):
                 columnas_ajustadas[col] = col_similar
             else:
                 columnas_faltantes.append(col)
-    
+
     if columnas_faltantes:
         logger.error(f"Columnas faltantes en {nombre_dataset}: {columnas_faltantes}")
         return False, columnas_ajustadas
-    
+
     return True, columnas_ajustadas
 
 # =========================
 # FUNCIÓN PRINCIPAL
 # =========================
 def generar_reporte():
-    """Función principal para generar el reporte"""
     try:
         logger.info("🚀 Iniciando generación de reporte...")
-        
+
         # =========================
-        # 1. VALIDAR ARCHIVOS DE ENTRADA
+        # 1. VALIDAR ARCHIVOS
         # =========================
-        logger.info("Validando archivos de entrada...")
         validar_archivo(Config.ACLARAPP_PATH, "TablaCopiadaDeAclarapp.csv")
         validar_archivo(Config.AGENTES_PATH, "InfoAgentes.csv")
-        
-        # Verificar que haya archivos CSV en la carpeta principal
+
         archivos_csv = list(Config.BASE_PATH.glob("*.csv"))
         if not archivos_csv:
             raise FileNotFoundError("❌ No se encontraron archivos CSV en la carpeta principal")
-        
-        logger.info(f"Encontrados {len(archivos_csv)} archivos CSV en la carpeta principal")
-        
+
+        logger.info(f"Encontrados {len(archivos_csv)} archivos CSV")
+
         # =========================
-        # 2. LEER LOGS PRINCIPALES
+        # 2. LEER LOGS
         # =========================
-        logger.info("Cargando logs principales...")
         logs_dfs = []
-        
+
         for archivo_csv in archivos_csv:
             try:
                 df_log = cargar_csv_con_validacion(archivo_csv)
                 logs_dfs.append(df_log)
-                logger.info(f"  ✓ Cargado: {archivo_csv.name} ({len(df_log)} registros)")
+                logger.info(f"✓ {archivo_csv.name} cargado ({len(df_log)} registros)")
             except Exception as e:
-                logger.warning(f"  ✗ No se pudo cargar {archivo_csv.name}: {e}")
-                continue
-        
+                logger.warning(f"✗ No se pudo cargar {archivo_csv.name}: {e}")
+
         if not logs_dfs:
-            raise Exception("❌ No se pudieron cargar los archivos CSV de logs")
-        
+            raise Exception("❌ No se pudieron cargar logs")
+
         logs_df = pd.concat(logs_dfs, ignore_index=True)
-        logger.info(f"Total de registros en logs: {len(logs_df)}")
-        
+
         # =========================
-        # 3. VALIDAR COLUMNAS DE LOGS
+        # 3. VALIDAR COLUMNAS LOGS
         # =========================
         valido, columnas_ajustadas = verificar_columnas_requeridas(
-            logs_df, 
-            Config.EXPECTED_LOG_COLUMNS, 
-            "logs"
+            logs_df,
+            Config.EXPECTED_LOG_COLUMNS,
+            "Logs"
         )
-        
+
         if not valido:
-            raise ValueError("Faltan columnas requeridas en los logs")
-        
+            raise ValueError("Faltan columnas requeridas en logs")
+
         # =========================
-        # 4. LEER ARCHIVO ACLARAPP
+        # 4. LEER ACLARAPP
         # =========================
-        logger.info("Cargando archivo Aclarapp...")
-        aclarapp_df = cargar_csv_con_validacion(
-            Config.ACLARAPP_PATH, 
-            sep='|'
-        )
-        logger.info(f"Registros en Aclarapp: {len(aclarapp_df)}")
-        
-        # Validar columnas de Aclarapp
+        aclarapp_df = cargar_csv_con_validacion(Config.ACLARAPP_PATH, sep='|')
+
         valido, _ = verificar_columnas_requeridas(
-            aclarapp_df, 
-            Config.EXPECTED_ACLARAPP_COLUMNS, 
+            aclarapp_df,
+            Config.EXPECTED_ACLARAPP_COLUMNS,
             "Aclarapp"
         )
-        
+
         if not valido:
             raise ValueError("Faltan columnas requeridas en Aclarapp")
-        
+
         # =========================
-        # 5. CRUCE LOGS + ACLARAPP
+        # 5. MERGE LOGS + ACLARAPP
         # =========================
-        logger.info("Realizando cruce con Aclarapp...")
-        
-        # Usar nombres de columnas ajustados si es necesario
-        columna_log_id = columnas_ajustadas.get('AclaracionID', 'AclaracionID')
-        
+        col_log_id = columnas_ajustadas.get('AclaracionID', 'AclaracionID')
+
         df_merge_1 = logs_df.merge(
             aclarapp_df,
             how="left",
-            left_on=columna_log_id,
+            left_on=col_log_id,
             right_on="ID Aclaración",
             suffixes=("", "_DUP"),
-            indicator=True  # Para verificar qué registros encontraron match
+            indicator=True
         )
-        
-        # Estadísticas del merge
-        match_stats = df_merge_1['_merge'].value_counts()
-        logger.info(f"Resultados del merge: {match_stats.to_dict()}")
-        
-        # Eliminar columna auxiliar de merge
+
+        logger.info(f"Merge Aclarapp: {df_merge_1['_merge'].value_counts().to_dict()}")
         df_merge_1.drop(columns=['_merge'], inplace=True)
-        
-        # Eliminar columnas duplicadas
-        df_merge_1 = eliminar_columnas_duplicadas(df_merge_1, '_DUP')
-        
+        df_merge_1 = eliminar_columnas_duplicadas(df_merge_1)
+
         # =========================
-        # 6. LEER ARCHIVO AGENTES
+        # 6. LEER AGENTES
         # =========================
-        logger.info("Cargando información de agentes...")
-        agentes_df = cargar_csv_con_validacion(
-            Config.AGENTES_PATH, 
-            sep='|'
-        )
-        logger.info(f"Registros de agentes: {len(agentes_df)}")
-        
-        # Validar columnas de agentes
+        agentes_df = cargar_csv_con_validacion(Config.AGENTES_PATH, sep='|')
+
         valido, _ = verificar_columnas_requeridas(
-            agentes_df, 
-            Config.EXPECTED_AGENTES_COLUMNS, 
+            agentes_df,
+            Config.EXPECTED_AGENTES_COLUMNS,
             "Agentes"
         )
-        
+
         if not valido:
-            raise ValueError("Faltan columnas requeridas en Agentes")
-        
+            raise ValueError("Faltan columnas requeridas en agentes")
+
         # =========================
-        # 7. CRUCE CON AGENTES
+        # 7. MERGE CON AGENTES
         # =========================
-        logger.info("Realizando cruce con información de agentes...")
-        
-        # Usar nombres de columnas ajustados si es necesario
-        columna_registro = columnas_ajustadas.get('Numero de registro', 'Numero de registro')
-        
+        col_registro = columnas_ajustadas.get('Numero de registro', 'Numero de registro')
+
         df_final = df_merge_1.merge(
             agentes_df,
             how="left",
-            left_on=columna_registro,
+            left_on=col_registro,
             right_on="ID",
             suffixes=("", "_AGENTE_DUP"),
             indicator="merge_agentes"
         )
-        
-        # Estadísticas del merge con agentes
-        agentes_match_stats = df_final['merge_agentes'].value_counts()
-        logger.info(f"Resultados del merge con agentes: {agentes_match_stats.to_dict()}")
-        
-        # Eliminar columnas auxiliares de merge
+
+        logger.info(f"Merge Agentes: {df_final['merge_agentes'].value_counts().to_dict()}")
         df_final.drop(columns=['merge_agentes'], inplace=True)
-        
-        # Eliminar columnas duplicadas de agentes
         df_final = eliminar_columnas_duplicadas(df_final, '_AGENTE_DUP')
-        
+
         # =========================
-        # 8. CREAR CARPETA DESTINO
+        # 8. CREAR CARPETA
         # =========================
         Config.OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Carpeta de salida: {Config.OUTPUT_FOLDER}")
-        
+
         # =========================
-        # 9. EXPORTAR A EXCEL
+        # 9. EXPORTAR EXCEL
         # =========================
         logger.info("Exportando a Excel...")
-        
-        # Configurar el escritor de Excel para múltiples hojas si es necesario
+
         with pd.ExcelWriter(
             Config.OUTPUT_FILE,
             engine='openpyxl',
             datetime_format='YYYY-MM-DD HH:MM:SS'
         ) as writer:
-            
-            # Hoja principal con todos los datos
+
             df_final.to_excel(
                 writer,
                 sheet_name='Reporte_Completo',
                 index=False
             )
-            
-            # Hoja adicional con resumen estadístico
-            crear_hoja_resumen(df_final, writer)
-            
-            # Hoja con registros sin match en agentes (para seguimiento)
+
             registros_sin_agente = df_final[df_final['ID'].isna()]
             if not registros_sin_agente.empty:
                 registros_sin_agente.to_excel(
@@ -285,48 +237,18 @@ def generar_reporte():
                     sheet_name='Sin_Agente_Asignado',
                     index=False
                 )
-        
+
         logger.info("✅ Reporte generado correctamente")
         logger.info(f"📂 Carpeta: {Config.OUTPUT_FOLDER}")
         logger.info(f"📄 Archivo: {Config.OUTPUT_FILE.name}")
-        logger.info(f"📊 Total registros procesados: {len(df_final)}")
-        
-        return True
-        
+        logger.info(f"📊 Total registros: {len(df_final)}")
+
     except Exception as e:
         logger.error(f"❌ Error durante la generación del reporte: {e}")
         raise
 
-def crear_hoja_resumen(df, excel_writer):
-    """Crea una hoja de resumen con estadísticas del reporte"""
-    resumen_data = {
-        'Métrica': [
-            'Total Registros',
-            'Registros con Aclarapp',
-            'Registros sin Aclarapp',
-            'Registros con Agente',
-            'Registros sin Agente',
-            'Fecha Generación'
-        ],
-        'Valor': [
-            len(df),
-            df['ID Aclaración'].notna().sum(),
-            df['ID Aclaración'].isna().sum(),
-            df['ID'].notna().sum(),
-            df['ID'].isna().sum(),
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ]
-    }
-    
-    df_resumen = pd.DataFrame(resumen_data)
-    df_resumen.to_excel(
-        excel_writer,
-        sheet_name='Resumen',
-        index=False
-    )
-
 # =========================
-# EJECUCIÓN PRINCIPAL
+# EJECUCIÓN
 # =========================
 if __name__ == "__main__":
     try:
