@@ -160,7 +160,7 @@ def aplicar_formato_tiempos(workbook, worksheet):
                 # Establecer formato personalizado en Excel
                 cell.number_format = "mm:ss"
         
-        # Aplicar escala de colores a la columna de segundos correspondiente
+        # Buscar la columna de segundos correspondiente
         if col_name == "Captura de Cargos":
             seg_col_name = "Captura de Cargos segundos"
         else:
@@ -174,14 +174,6 @@ def aplicar_formato_tiempos(workbook, worksheet):
                 break
         
         if seg_col_idx:
-            seg_col_letter = get_column_letter(seg_col_idx)
-            
-            # Definir rango para la escala de colores (excluyendo encabezado)
-            start_row = 2
-            end_row = worksheet.max_row
-            rango = f"{col_letter}{start_row}:{col_letter}{end_row}"
-            rango_segundos = f"{seg_col_letter}{start_row}:{seg_col_letter}{end_row}"
-            
             # Crear regla de escala de colores
             # Rojo (alto) -> Amarillo (medio) -> Verde (bajo)
             color_scale = ColorScaleRule(
@@ -194,12 +186,27 @@ def aplicar_formato_tiempos(workbook, worksheet):
                 end_color='F8696B'     # Rojo
             )
             
-            # Aplicar la escala de colores basada en los segundos
+            # Aplicar la escala de colores a la columna de tiempo
+            start_row = 2
+            end_row = worksheet.max_row
+            rango = f"{col_letter}{start_row}:{col_letter}{end_row}"
+            
             try:
-                # Intentar aplicar la escala de colores directamente
                 worksheet.conditional_formatting.add(rango, color_scale)
             except Exception as e:
                 logger.warning(f"No se pudo aplicar escala de colores: {e}")
+
+def crear_data_bar_solida(color):
+    """
+    Crea una regla de DataBar con relleno sólido.
+    """
+    return DataBarRule(
+        start_type="num", 
+        start_value=0,
+        end_type="max", 
+        color=color,
+        showValue=True
+    )
 
 def crear_resumen_por_agente(workbook, dataframe):
     """
@@ -276,84 +283,31 @@ def crear_resumen_por_agente(workbook, dataframe):
             celda.alignment = center_alignment
             celda.border = white_border
             total_site += count
-            
-            # Aplicar barra de datos SOLIDA para cada celda individual
-            if count > 0:
-                regla = DataBarRule(
-                    start_type="num", 
-                    start_value=0,
-                    end_type="max", 
-                    color="FFD966",
-                    gradient=False,  # Relleno sólido
-                    showValue=True
-                )
-                rango_celda = f"{get_column_letter(col_inicio + i)}{fila_idx}"
-                ws.conditional_formatting.add(rango_celda, regla)
         
         # Celda de total para el site
         celda_total_site = ws.cell(row=fila_idx, column=total_col, value=total_site)
         celda_total_site.alignment = center_alignment
         celda_total_site.border = white_border
-        
-        # Aplicar barra de datos SOLIDA para el total del site
-        if total_site > 0:
-            regla_total = DataBarRule(
-                start_type="num", 
-                start_value=0,
-                end_type="max", 
-                color="63BE7B",
-                gradient=False,  # Relleno sólido
-                showValue=True
-            )
-            rango_total = f"{get_column_letter(total_col)}{fila_idx}"
-            ws.conditional_formatting.add(rango_total, regla_total)
     
-    # ===== TOTAL GENERAL - CON BARRAS DE DATOS INDEPENDIENTES POR DÍA =====
+    # ===== TOTAL GENERAL =====
     celda_total_label = ws.cell(row=4, column=6, value="Total")
     celda_total_label.fill = rojo
     celda_total_label.font = blanco
     celda_total_label.alignment = center_alignment
     celda_total_label.border = white_border
     
-    # Aplicar barras de datos INDIVIDUALES por cada día para el total general
     for i, dia in enumerate(dias):
         count = len(df[df["Fecha_dia"] == dia])
         celda = ws.cell(row=4, column=col_inicio + i, value=count)
         celda.alignment = center_alignment
         celda.border = white_border
-        
-        # Aplicar barra de datos SOLIDA para cada celda individual del total general
-        if count > 0:
-            regla = DataBarRule(
-                start_type="num", 
-                start_value=0,
-                end_type="max", 
-                color="5B9BD5",  # Azul para totales diarios generales
-                gradient=False,  # Relleno sólido
-                showValue=True
-            )
-            rango_celda = f"{get_column_letter(col_inicio + i)}4"
-            ws.conditional_formatting.add(rango_celda, regla)
     
     total_general = len(df)
     celda_total_general = ws.cell(row=4, column=total_col, value=total_general)
     celda_total_general.alignment = center_alignment
     celda_total_general.border = white_border
     
-    # Aplicar barra de datos SOLIDA para el total general
-    if total_general > 0:
-        regla_total_general = DataBarRule(
-            start_type="num", 
-            start_value=0,
-            end_type="max", 
-            color="4472C4",  # Azul más oscuro para total general
-            gradient=False,  # Relleno sólido
-            showValue=True
-        )
-        rango_total_general = f"{get_column_letter(total_col)}4"
-        ws.conditional_formatting.add(rango_total_general, regla_total_general)
-    
-    # ===== DETALLE POR AGENTE - CON BARRAS DE DATOS INDEPENDIENTES POR DÍA =====
+    # ===== DETALLE POR AGENTE =====
     fila_base = 6
     
     # Encabezados de agentes
@@ -406,7 +360,7 @@ def crear_resumen_por_agente(workbook, dataframe):
         if total_agente > max_por_columna[total_col]:
             max_por_columna[total_col] = total_agente
     
-    # Ahora escribir los datos y aplicar barras de datos INDIVIDUALES
+    # Ahora escribir los datos
     fila_actual = fila_base + 1
     
     for idx, ((keys, group), valores_fila) in enumerate(zip(grouped, valores_agentes)):
@@ -416,26 +370,12 @@ def crear_resumen_por_agente(workbook, dataframe):
             celda.alignment = center_alignment
             celda.border = white_border
         
-        # Escribir valores por día y aplicar barras de datos INDIVIDUALES
+        # Escribir valores por día
         for i in range(len(dias)):
             count = valores_fila[i]
             celda = ws.cell(row=fila_actual, column=col_inicio + i, value=count)
             celda.alignment = center_alignment
             celda.border = white_border
-            
-            # Aplicar barra de datos SOLIDA para cada celda individual
-            if count > 0:
-                regla = DataBarRule(
-                    start_type="num", 
-                    start_value=0,
-                    end_type="num", 
-                    end_value=max_por_columna[col_inicio + i] if max_por_columna[col_inicio + i] > 0 else 1,
-                    color="FFD966",
-                    gradient=False,  # Relleno sólido
-                    showValue=True
-                )
-                rango_celda = f"{get_column_letter(col_inicio + i)}{fila_actual}"
-                ws.conditional_formatting.add(rango_celda, regla)
         
         # Total del agente
         total_agente = valores_fila[-1]
@@ -443,21 +383,120 @@ def crear_resumen_por_agente(workbook, dataframe):
         celda_total_agente.alignment = center_alignment
         celda_total_agente.border = white_border
         
-        # Aplicar barra de datos SOLIDA para el total del agente
-        if total_agente > 0:
+        fila_actual += 1
+    
+    # ===== APLICAR BARRAS DE DATOS DESPUÉS DE ESCRIBIR TODOS LOS DATOS =====
+    
+    # Para CDMX y GDL (filas 2-3)
+    for fila in [2, 3]:
+        # Barras para días individuales (amarillo)
+        for i in range(len(dias)):
+            col_letter = get_column_letter(col_inicio + i)
+            rango = f"{col_letter}{fila}"
+            
+            # Obtener valor máximo de esta columna para CDMX+GDL
+            max_valor = 0
+            for f in [2, 3]:
+                val = ws.cell(row=f, column=col_inicio + i).value
+                if val and val > max_valor:
+                    max_valor = val
+            
+            if max_valor > 0:
+                regla = DataBarRule(
+                    start_type="num", 
+                    start_value=0,
+                    end_type="num",
+                    end_value=max_valor,
+                    color="FFD966",  # Amarillo
+                    showValue=True
+                )
+                ws.conditional_formatting.add(rango, regla)
+        
+        # Barra para total (verde)
+        rango_total = f"{get_column_letter(total_col)}{fila}"
+        max_total = max(
+            ws.cell(row=2, column=total_col).value or 0,
+            ws.cell(row=3, column=total_col).value or 0
+        )
+        
+        if max_total > 0:
             regla_total = DataBarRule(
                 start_type="num", 
                 start_value=0,
-                end_type="num", 
-                end_value=max_por_columna[total_col] if max_por_columna[total_col] > 0 else 1,
-                color="63BE7B",
-                gradient=False,  # Relleno sólido
+                end_type="num",
+                end_value=max_total,
+                color="63BE7B",  # Verde
                 showValue=True
             )
-            rango_total = f"{get_column_letter(total_col)}{fila_actual}"
             ws.conditional_formatting.add(rango_total, regla_total)
+    
+    # Para Total General (fila 4)
+    for i in range(len(dias)):
+        col_letter = get_column_letter(col_inicio + i)
+        rango = f"{col_letter}4"
+        valor = ws.cell(row=4, column=col_inicio + i).value or 0
         
-        fila_actual += 1
+        if valor > 0:
+            regla = DataBarRule(
+                start_type="num", 
+                start_value=0,
+                end_type="num",
+                end_value=valor,  # Usar el mismo valor como máximo para mostrar barra completa
+                color="5B9BD5",  # Azul claro
+                showValue=True
+            )
+            ws.conditional_formatting.add(rango, regla)
+    
+    # Barra para total general
+    rango_total_general = f"{get_column_letter(total_col)}4"
+    valor_total_general = ws.cell(row=4, column=total_col).value or 0
+    
+    if valor_total_general > 0:
+        regla_total_general = DataBarRule(
+            start_type="num", 
+            start_value=0,
+            end_type="num",
+            end_value=valor_total_general,
+            color="4472C4",  # Azul oscuro
+            showValue=True
+        )
+        ws.conditional_formatting.add(rango_total_general, regla_total_general)
+    
+    # Para Agentes (a partir de fila 7)
+    for fila in range(fila_base + 1, fila_actual):
+        # Barras para días individuales (amarillo)
+        for i in range(len(dias)):
+            col_letter = get_column_letter(col_inicio + i)
+            rango = f"{col_letter}{fila}"
+            valor = ws.cell(row=fila, column=col_inicio + i).value or 0
+            max_col = max_por_columna[col_inicio + i] or 1
+            
+            if valor > 0:
+                regla = DataBarRule(
+                    start_type="num", 
+                    start_value=0,
+                    end_type="num",
+                    end_value=max_col,
+                    color="FFD966",  # Amarillo
+                    showValue=True
+                )
+                ws.conditional_formatting.add(rango, regla)
+        
+        # Barra para total del agente (verde)
+        rango_total = f"{get_column_letter(total_col)}{fila}"
+        valor_total = ws.cell(row=fila, column=total_col).value or 0
+        max_total_col = max_por_columna[total_col] or 1
+        
+        if valor_total > 0:
+            regla_total = DataBarRule(
+                start_type="num", 
+                start_value=0,
+                end_type="num",
+                end_value=max_total_col,
+                color="63BE7B",  # Verde
+                showValue=True
+            )
+            ws.conditional_formatting.add(rango_total, regla_total)
     
     # Ajustar ancho de columnas
     for col in range(1, total_col + 1):
