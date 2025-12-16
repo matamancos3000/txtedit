@@ -1,12 +1,12 @@
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
-import logging
+from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill
-from openpyxl.utils import get_column_letter
+import logging
 
 # =========================
-# CONFIGURACIÓN DE LOGGING
+# CONFIGURACIÓN LOGGING
 # =========================
 logging.basicConfig(
     level=logging.INFO,
@@ -17,35 +17,18 @@ logger = logging.getLogger(__name__)
 # =========================
 # CONFIGURACIÓN GENERAL
 # =========================
-BASE_PATH = Path("c:/Copia-reporte-Aclarabot")
-
+BASE_PATH = Path("c:/Copia-reporte-Aclarabot/Reporte_Excel")
 MES_ANIO = datetime.now().strftime("%b-%Y")
-MES_ANIO_ARCHIVO = datetime.now().strftime("%b-%y")
+ARCHIVO_ENTRADA = BASE_PATH / MES_ANIO / f"{MES_ANIO}.xlsx"
+ARCHIVO_SALIDA = BASE_PATH / MES_ANIO / f"Reporte_Aclarapp_{MES_ANIO}.xlsx"
 
-INPUT_EXCEL = (
-    BASE_PATH
-    / "Reporte_Excel"
-    / MES_ANIO
-    / f"{MES_ANIO}.xlsx"
-)
+HOJA_ORIGEN = "Reporte_Completo"
+HOJA_DESTINO = "Reporte Aclarapp"
 
-OUTPUT_EXCEL = (
-    BASE_PATH
-    / "Reporte_Excel"
-    / MES_ANIO
-    / f"Reporte_Aclarapp_{MES_ANIO_ARCHIVO}.xlsx"
-)
-
-SHEET_INPUT = "Reporte_Completo"
-SHEET_OUTPUT = "Reporte Aclarapp"
-
-# =========================
-# COLUMNAS AUDITORÍA
-# =========================
 COLUMNAS_AUDITORIA = [
     "Fecha",
     "Tipo de tarjeta",
-    "Tipo de aclaracion",
+    "Tipo de aclaración",
     "Numero de registro",
     "NOMBRE",
     "Supervisor",
@@ -53,147 +36,120 @@ COLUMNAS_AUDITORIA = [
     "Folio",
     "CIS",
     "Cargos",
-    "AclaracionID"  # solo para eliminar duplicados
+    "AclaracionID"
 ]
 
 # =========================
-# ESTILOS (MODIFICABLES)
+# FUNCIONES
 # =========================
-HEADER_FILL_COLOR = "FF0000"
-HEADER_FONT_COLOR = "FFFFFF"
-FONT_NAME = "Calibri"
-
-# =========================
-# FUNCIÓN AUXILIAR
-# =========================
-def convertir_fecha_mixta(serie_fecha):
-    """
-    Convierte fechas con formatos mixtos a datetime.
-    Soporta AM/PM, 24h, con o sin segundos.
-    """
+def convertir_fecha_mixta(col):
+    """Convierte fechas con y sin AM/PM"""
     return pd.to_datetime(
-        serie_fecha,
+        col,
+        errors="coerce",
         dayfirst=True,
-        infer_datetime_format=True,
-        errors="coerce"
+        infer_datetime_format=True
     )
 
 # =========================
-# FUNCIÓN PRINCIPAL
+# PROCESO PRINCIPAL
 # =========================
 def generar_reporte_auditoria():
-    logger.info("🚀 Generando reporte para Auditoría")
+    logger.info("🚀 Generando reporte de auditoría...")
 
-    if not INPUT_EXCEL.exists():
-        raise FileNotFoundError(f"No se encontró el archivo base: {INPUT_EXCEL}")
+    if not ARCHIVO_ENTRADA.exists():
+        raise FileNotFoundError(f"No existe el archivo base: {ARCHIVO_ENTRADA}")
 
     # =========================
     # 1. LEER EXCEL BASE
     # =========================
     df = pd.read_excel(
-        INPUT_EXCEL,
-        sheet_name=SHEET_INPUT,
+        ARCHIVO_ENTRADA,
+        sheet_name=HOJA_ORIGEN,
         dtype=str
     )
 
-    logger.info(f"Registros cargados: {len(df)}")
+    logger.info(f"Registros iniciales: {len(df)}")
 
     # =========================
-    # 2. ELIMINAR DUPLICADOS
+    # 2. FILTRAR COLUMNAS
     # =========================
-    df = df.drop_duplicates(subset=["AclaracionID"])
-    logger.info(f"Registros tras eliminar duplicados: {len(df)}")
+    columnas_disponibles = [c for c in COLUMNAS_AUDITORIA if c in df.columns]
+    df = df[columnas_disponibles]
 
     # =========================
-    # 3. ELIMINAR NOMBRE VACÍO
+    # 3. ELIMINAR DUPLICADOS
     # =========================
-    df["NOMBRE"] = df["NOMBRE"].str.strip()
-    df = df[df["NOMBRE"].notna() & (df["NOMBRE"] != "")]
-    logger.info(f"Registros con agente válido: {len(df)}")
+    if "AclaracionID" in df.columns:
+        df = df.drop_duplicates(subset="AclaracionID")
+        logger.info("Duplicados eliminados por AclaracionID")
 
     # =========================
-    # 4. SELECCIONAR COLUMNAS
-    # =========================
-    df = df[COLUMNAS_AUDITORIA]
-
-    # =========================
-    # 5. CONVERTIR FECHA (ROBUSTO)
+    # 4. CONVERTIR FECHA
     # =========================
     df["Fecha"] = convertir_fecha_mixta(df["Fecha"])
 
     # =========================
-    # 6. ORDENAR POR FECHA
+    # 5. ORDENAR POR FECHA
     # =========================
     df = df.sort_values(by="Fecha", ascending=True)
 
-    # Eliminar columna técnica
-    df = df.drop(columns=["AclaracionID"])
+    # =========================
+    # 6. ELIMINAR PRUEBAS (SIN NOMBRE)
+    # =========================
+    df["NOMBRE"] = df["NOMBRE"].astype(str).str.strip()
+    df = df[
+        df["NOMBRE"].notna() &
+        (df["NOMBRE"] != "") &
+        (df["NOMBRE"].str.lower() != "nan")
+    ]
+
+    logger.info(f"Registros finales para auditoría: {len(df)}")
 
     # =========================
-    # 7. EXPORTAR A EXCEL
+    # 7. EXPORTAR EXCEL
     # =========================
-    OUTPUT_EXCEL.parent.mkdir(parents=True, exist_ok=True)
-
     with pd.ExcelWriter(
-        OUTPUT_EXCEL,
-        engine="openpyxl"
+        ARCHIVO_SALIDA,
+        engine="openpyxl",
+        datetime_format="DD/MM/YYYY HH:MM"
     ) as writer:
-        df.to_excel(
+        df.drop(columns=["AclaracionID"], errors="ignore").to_excel(
             writer,
-            sheet_name=SHEET_OUTPUT,
+            sheet_name=HOJA_DESTINO,
             index=False
         )
 
-        ws = writer.book[SHEET_OUTPUT]
+    # =========================
+    # 8. FORMATO EXCEL
+    # =========================
+    wb = load_workbook(ARCHIVO_SALIDA)
+    ws = wb[HOJA_DESTINO]
 
-        # =========================
-        # 8. ESTILO DE ENCABEZADOS
-        # =========================
-        header_font = Font(
-            name=FONT_NAME,
-            bold=True,
-            color=HEADER_FONT_COLOR
-        )
-        header_fill = PatternFill(
-            start_color=HEADER_FILL_COLOR,
-            end_color=HEADER_FILL_COLOR,
-            fill_type="solid"
-        )
+    header_fill = PatternFill("solid", fgColor="FF0000")
+    header_font = Font(color="FFFFFF", bold=True, name="Calibri")
 
-        for cell in ws[1]:
-            cell.font = header_font
-            cell.fill = header_fill
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
 
-        # =========================
-        # 9. FORMATO FECHA CORTA
-        # =========================
-        for cell in ws["A"][1:]:
-            cell.number_format = "DD/MM/YYYY"
+    # Fuente general
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            cell.font = Font(name="Calibri")
 
-        # =========================
-        # 10. AUTOAJUSTE DE ANCHO
-        # =========================
-        for col in ws.columns:
-            max_length = 0
-            col_letter = get_column_letter(col[0].column)
+    # Auto ancho de columnas
+    for col in ws.columns:
+        max_length = max(len(str(cell.value)) if cell.value else 0 for cell in col)
+        ws.column_dimensions[col[0].column_letter].width = max_length + 2
 
-            for cell in col:
-                if cell.value is not None:
-                    max_length = max(max_length, len(str(cell.value)))
+    wb.save(ARCHIVO_SALIDA)
 
-            ws.column_dimensions[col_letter].width = max_length + 2
-
-    logger.info("✅ Reporte de Auditoría generado correctamente")
-    logger.info(f"📄 Archivo: {OUTPUT_EXCEL.name}")
-    logger.info(f"📊 Total registros finales: {len(df)}")
-
+    logger.info("✅ Reporte de auditoría generado correctamente")
+    logger.info(f"📄 Archivo: {ARCHIVO_SALIDA.name}")
 
 # =========================
 # EJECUCIÓN
 # =========================
 if __name__ == "__main__":
-    try:
-        generar_reporte_auditoria()
-    except Exception as e:
-        logger.error(f"❌ Error fatal: {e}")
-        raise
+    generar_reporte_auditoria()
