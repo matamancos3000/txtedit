@@ -1,16 +1,20 @@
 import pandas as pd
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date
 from openpyxl import load_workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.formatting.rule import ColorScaleRule, DataBarRule
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.formatting.rule import DataBarRule
 from openpyxl.utils import get_column_letter
 import logging
 
 # =========================
 # LOGGING
 # =========================
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, 
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
+)
 logger = logging.getLogger(__name__)
 
 # =========================
@@ -24,138 +28,367 @@ ARCHIVO_SALIDA = BASE_PATH / MES_ANIO / f"ReporteDEV_Aclarapp_{MES_ANIO}.xlsx"
 
 HOJA_ORIGEN = "Reporte_Completo"
 HOJA_REPORTE = "Reporte Aclarapp"
-HOJA_USUARIO_NO = "Usuario no Encontrado"
+HOJA_USUARIO_NO_ENCONTRADO = "Usuario no Encontrado"
 HOJA_DUPLICADOS = "AclaracionID duplicadas"
 HOJA_RESUMEN = "Resumen por Agente"
 
+# =========================
+# ORDEN FINAL
+# =========================
 COLUMNAS_FINALES = [
-    "ENTORNO","Fecha","Tipo de tarjeta","Tipo de aclaracion","Detalles de aclaracion",
-    "Numero de registro","NOMBRE","Supervisor","Site","Skill",
-    "Folio","CIS","Cargos","AclaracionID",
-    "Fecha Creación","Fecha Enviado","Fecha Asignacion","Fecha Atendido",
-    "Captura de Cargos","Tiempo Robot","Aclaración",
-    "Captura de Cargos segundos","Tiempo Robot segundos",
-    "Captura de Cargos categoria","Tiempo Robot Categoria"
+    "ENTORNO", "Fecha", "Tipo de tarjeta", "Tipo de aclaracion", "Detalles de aclaracion",
+    "Numero de registro", "NOMBRE", "Supervisor", "Site", "Skill", "Folio", "CIS", "Cargos",
+    "AclaracionID", "Fecha Creación", "Fecha Enviado", "Fecha Asignacion", "Fecha Atendido",
+    "Captura de Cargos", "Tiempo Robot", "Aclaración",
+    "Captura de Cargos segundos", "Tiempo Robot segundos",
+    "Captura de Cargos categoria", "Tiempo Robot Categoria"
 ]
 
 # =========================
 # FUNCIONES
 # =========================
-def convertir_fecha(col):
+def convertir_fecha_universal(col):
+    """
+    Convierte una columna a formato datetime usando múltiples formatos.
+    """
     formatos = [
         "%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S",
         "%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %I:%M %p",
         "%Y-%m-%d %H:%M:%S", "%d/%m/%Y"
     ]
-    def parse(v):
-        if pd.isna(v): return pd.NaT
-        for f in formatos:
-            try: return datetime.strptime(str(v).strip(), f)
-            except: pass
-        return pd.to_datetime(v, dayfirst=True, errors="coerce")
-    return col.apply(parse)
+    
+    def parse_date(value):
+        if pd.isna(value):
+            return pd.NaT
+        if isinstance(value, (datetime, pd.Timestamp)):
+            return value
+        
+        str_value = str(value).strip()
+        for fmt in formatos:
+            try:
+                return datetime.strptime(str_value, fmt)
+            except (ValueError, TypeError):
+                continue
+        
+        try:
+            return pd.to_datetime(str_value, dayfirst=True, errors="coerce")
+        except:
+            return pd.NaT
+    
+    return col.apply(parse_date)
 
-def categorizar(seg):
-    if pd.isna(seg): return None
-    if seg > 300: return "Más de 5 minutos"
-    if seg > 180: return "3 a 5 minutos"
-    if seg > 90: return "1.5 a 3 minutos"
+def categorizar_tiempo(segundos):
+    """
+    Categoriza el tiempo en segundos a rangos específicos.
+    """
+    if pd.isna(segundos):
+        return "Sin dato"
+    if segundos > 300:
+        return "Más de 5 minutos"
+    if segundos > 180:
+        return "3 a 5 minutos"
+    if segundos > 90:
+        return "1.5 a 3 minutos"
     return "Menor a 1.5 minutos"
 
-def aplicar_estilos(ws):
+def aplicar_estilos(worksheet):
+    """
+    Aplica estilos consistentes a una hoja de Excel.
+    """
+    # Estilos para encabezado
     header_fill = PatternFill("solid", fgColor="C00000")
-    header_font = Font(color="FFFFFF", bold=True, name="Calibri")
-    center = Alignment(horizontal="center", vertical="center")
+    header_font = Font(color="FFFFFF", bold=True)
+    center_alignment = Alignment(horizontal="center", vertical="center")
+    
+    # Aplicar a encabezados (fila 1)
+    for cell in worksheet[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center_alignment
+    
+    # Aplicar alineación central a todas las celdas de datos
+    for row in worksheet.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = center_alignment
+    
+    # Ajustar ancho de columnas automáticamente
+    for column in worksheet.columns:
+        max_length = 0
+        column_letter = get_column_letter(column[0].column)
+        
+        for cell in column:
+            try:
+                cell_length = len(str(cell.value)) if cell.value else 0
+                if cell_length > max_length:
+                    max_length = cell_length
+            except:
+                pass
+        
+        adjusted_width = min(max_length + 2, 50)  # Máximo 50 caracteres
+        worksheet.column_dimensions[column_letter].width = adjusted_width
 
-    for c in ws[1]:
-        c.fill = header_fill
-        c.font = header_font
-        c.alignment = center
+def crear_resumen_por_agente(workbook, dataframe):
+    """
+    Crea una hoja de resumen por agente con estadísticas diarias.
+    """
+    if dataframe.empty:
+        logger.warning("DataFrame vacío, no se puede crear resumen")
+        return
+    
+    # Crear copia para no modificar el original
+    df = dataframe.copy()
+    
+    # Crear columna de fecha (sin hora)
+    df["Fecha_dia"] = df["Fecha"].dt.date
+    dias = sorted(df["Fecha_dia"].unique())
+    dias_str = [d.strftime("%d-%b").lower() for d in dias]
+    
+    # Crear nueva hoja
+    if HOJA_RESUMEN in workbook.sheetnames:
+        workbook.remove(workbook[HOJA_RESUMEN])
+    ws = workbook.create_sheet(HOJA_RESUMEN)
+    
+    # Colores y estilos
+    negro = PatternFill("solid", fgColor="000000")
+    rojo = PatternFill("solid", fgColor="C00000")
+    blanco = Font(color="FFFFFF", bold=True)
+    
+    col_inicio = 7  # Columna donde empiezan los días
+    
+    # ===== ENCABEZADOS SUPERIORES =====
+    # Días individuales
+    for i, dia in enumerate(dias_str):
+        celda = ws.cell(row=1, column=col_inicio + i, value=dia)
+        celda.fill = negro
+        celda.font = blanco
+    
+    # Columna "Total"
+    total_col = col_inicio + len(dias_str)
+    celda_total = ws.cell(row=1, column=total_col, value="Total")
+    celda_total.fill = rojo
+    celda_total.font = blanco
+    
+    # ===== TOTALES POR SITE =====
+    sites = ["CDMX", "GDL"]
+    for fila_idx, site in enumerate(sites, start=2):
+        ws.cell(row=fila_idx, column=6, value=site)
+        
+        total_site = 0
+        for i, dia in enumerate(dias):
+            count = len(df[(df["Site"] == site) & (df["Fecha_dia"] == dia)])
+            ws.cell(row=fila_idx, column=col_inicio + i, value=count)
+            total_site += count
+        
+        ws.cell(row=fila_idx, column=total_col, value=total_site)
+        
+        # Aplicar DataBar para visualización
+        if total_site > 0:
+            regla = DataBarRule(
+                start_type="min", 
+                end_type="max", 
+                color="FFD966"
+            )
+            rango = f"{get_column_letter(col_inicio)}{fila_idx}:{get_column_letter(total_col-1)}{fila_idx}"
+            ws.conditional_formatting.add(rango, regla)
+    
+    # ===== TOTAL GENERAL =====
+    ws.cell(row=4, column=6, value="Total")
+    for i, dia in enumerate(dias):
+        ws.cell(row=4, column=col_inicio + i, value=len(df[df["Fecha_dia"] == dia]))
+    ws.cell(row=4, column=total_col, value=len(df))
+    
+    # ===== DETALLE POR AGENTE =====
+    fila_base = 6
+    
+    # Encabezados de agentes
+    headers_agentes = ["Numero de registro", "NOMBRE", "Supervisor", "Site", "Skill"]
+    for i, header in enumerate(headers_agentes, start=1):
+        ws.cell(row=fila_base, column=i, value=header)
+        ws.cell(row=fila_base, column=i).fill = rojo
+        ws.cell(row=fila_base, column=i).font = blanco
+    
+    # Encabezados de días (para sección de agentes)
+    for i, dia in enumerate(dias_str):
+        celda = ws.cell(row=fila_base, column=col_inicio + i, value=dia)
+        celda.fill = rojo
+        celda.font = blanco
+    
+    # Encabezado "Total" para agentes
+    celda = ws.cell(row=fila_base, column=total_col, value="Total")
+    celda.fill = negro
+    celda.font = blanco
+    
+    # Datos por agente
+    fila_actual = fila_base + 1
+    
+    # Agrupar por agentes
+    grouped = df.groupby(headers_agentes)
+    
+    for (keys, group) in grouped:
+        # Escribir datos del agente
+        for i, value in enumerate(keys):
+            ws.cell(row=fila_actual, column=i + 1, value=value)
+        
+        # Contar por día
+        total_agente = 0
+        for i, dia in enumerate(dias):
+            count = len(group[group["Fecha_dia"] == dia])
+            ws.cell(row=fila_actual, column=col_inicio + i, value=count)
+            total_agente += count
+        
+        # Total del agente
+        ws.cell(row=fila_actual, column=total_col, value=total_agente)
+        
+        # Aplicar formato condicional
+        if total_agente > 0:
+            # Barras para días individuales
+            regla_dias = DataBarRule(
+                start_type="min", 
+                end_type="max", 
+                color="FFD966"
+            )
+            rango_dias = f"{get_column_letter(col_inicio)}{fila_actual}:{get_column_letter(col_inicio + len(dias_str) - 1)}{fila_actual}"
+            ws.conditional_formatting.add(rango_dias, regla_dias)
+            
+            # Barra para total
+            regla_total = DataBarRule(
+                start_type="min", 
+                end_type="max", 
+                color="63BE7B"
+            )
+            celda_total = f"{get_column_letter(total_col)}{fila_actual}"
+            ws.conditional_formatting.add(celda_total, regla_total)
+        
+        fila_actual += 1
+    
+    # Ajustar ancho de columnas
+    for col in range(1, total_col + 1):
+        col_letter = get_column_letter(col)
+        ws.column_dimensions[col_letter].width = 15
 
-    for row in ws.iter_rows(min_row=2):
-        for c in row:
-            c.font = Font(name="Calibri")
-            c.alignment = center
-
-    for col in ws.columns:
-        ws.column_dimensions[col[0].column_letter].width = max(
-            len(str(c.value)) if c.value else 0 for c in col
-        ) + 2
+def verificar_archivos():
+    """
+    Verifica que los archivos necesarios existan.
+    """
+    if not ARCHIVO_ENTRADA.exists():
+        raise FileNotFoundError(f"Archivo de entrada no encontrado: {ARCHIVO_ENTRADA}")
+    
+    # Crear directorio de salida si no existe
+    ARCHIVO_SALIDA.parent.mkdir(parents=True, exist_ok=True)
 
 # =========================
 # PROCESO PRINCIPAL
 # =========================
-def generar_reporte():
-    logger.info("🚀 Generando Reporte DEV completo")
-
-    df = pd.read_excel(ARCHIVO_ENTRADA, sheet_name=HOJA_ORIGEN)
-
-    # Fechas
-    for c in ["Fecha","Fecha Creación","Fecha Enviado","Fecha Asignacion","Fecha Atendido"]:
-        df[c] = convertir_fecha(df[c])
-
-    # Texto forzado
-    df["Folio"] = df["Folio"].astype(str)
-    df["CIS"] = df["CIS"].astype(str)
-
-    # Usuarios sin nombre
-    df_usuario_no = df[df["NOMBRE"].isna() | (df["NOMBRE"].str.strip() == "")]
-    df = df.drop(df_usuario_no.index)
-
-    # Duplicados (conservar más antiguo)
-    df = df.sort_values("Fecha")
-    df_duplicados = df[df.duplicated("AclaracionID", keep="first")]
-    df = df.drop(df_duplicados.index)
-
-    # Tiempos
-    df["Captura de Cargos"] = df["Fecha Enviado"] - df["Fecha Creación"]
-    df["Tiempo Robot"] = df["Fecha Atendido"] - df["Fecha Asignacion"]
-
-    df["Captura de Cargos segundos"] = df["Captura de Cargos"].dt.total_seconds()
-    df["Tiempo Robot segundos"] = df["Tiempo Robot"].dt.total_seconds()
-
-    df["Captura de Cargos categoria"] = df["Captura de Cargos segundos"].apply(categorizar)
-    df["Tiempo Robot Categoria"] = df["Tiempo Robot segundos"].apply(categorizar)
-
-    df["Aclaración"] = 1
-
-    for c in COLUMNAS_FINALES:
-        if c not in df.columns:
-            df[c] = None
-
-    df = df[COLUMNAS_FINALES]
-
-    with pd.ExcelWriter(ARCHIVO_SALIDA, engine="openpyxl", datetime_format="DD/MM/YYYY") as writer:
-        df.to_excel(writer, sheet_name=HOJA_REPORTE, index=False)
-        df_usuario_no.to_excel(writer, sheet_name=HOJA_USUARIO_NO, index=False)
-        df_duplicados.to_excel(writer, sheet_name=HOJA_DUPLICADOS, index=False)
-
-    wb = load_workbook(ARCHIVO_SALIDA)
-    ws = wb[HOJA_REPORTE]
-
-    # mm:ss + escala colores
-    for col in ["Captura de Cargos","Tiempo Robot"]:
-        idx = COLUMNAS_FINALES.index(col)+1
-        letra = ws.cell(row=1,column=idx).column_letter
-        for c in ws[letra][1:]:
-            c.number_format = "[mm]:ss"
-
-        regla = ColorScaleRule(
-            start_type="min", start_color="63BE7B",
-            mid_type="percentile", mid_value=50, mid_color="FFEB84",
-            end_type="max", end_color="F8696B"
-        )
-        ws.conditional_formatting.add(f"{letra}2:{letra}{ws.max_row}", regla)
-
-    aplicar_estilos(ws)
-    aplicar_estilos(wb[HOJA_USUARIO_NO])
-    aplicar_estilos(wb[HOJA_DUPLICADOS])
-
-    wb.save(ARCHIVO_SALIDA)
-    logger.info("✅ Reporte generado correctamente")
+def generar_reporte_dev():
+    """
+    Función principal para generar el reporte DEV de Aclarapp.
+    """
+    try:
+        logger.info("🚀 Iniciando generación de Reporte Aclarapp")
+        
+        # Verificar archivos
+        verificar_archivos()
+        
+        # Cargar datos
+        logger.info(f"📂 Cargando datos desde: {ARCHIVO_ENTRADA}")
+        df = pd.read_excel(ARCHIVO_ENTRADA, sheet_name=HOJA_ORIGEN)
+        
+        if df.empty:
+            logger.warning("El archivo de entrada está vacío")
+            return
+        
+        # Convertir fechas
+        logger.info("🕐 Convirtiendo formatos de fecha")
+        columnas_fecha = ["Fecha", "Fecha Creación", "Fecha Enviado", "Fecha Asignacion", "Fecha Atendido"]
+        
+        for col in columnas_fecha:
+            if col in df.columns:
+                df[col] = convertir_fecha_universal(df[col])
+            else:
+                logger.warning(f"Columna {col} no encontrada en el archivo de entrada")
+                df[col] = pd.NaT
+        
+        # Convertir columnas a string
+        for col in ["Folio", "CIS"]:
+            if col in df.columns:
+                df[col] = df[col].astype(str)
+        
+        # Filtrar usuarios no encontrados
+        logger.info("👤 Filtrando usuarios no encontrados")
+        mask_usuario_no = df["NOMBRE"].isna() | (df["NOMBRE"].astype(str).str.strip() == "")
+        df_usuario_no = df[mask_usuario_no].copy()
+        df = df[~mask_usuario_no].copy()
+        
+        # Ordenar por fecha
+        df = df.sort_values("Fecha", ascending=True)
+        
+        # Manejar duplicados
+        logger.info("🔍 Identificando duplicados")
+        mask_duplicados = df.duplicated("AclaracionID", keep="first")
+        df_duplicados = df[mask_duplicados].copy()
+        df = df[~mask_duplicados].copy()
+        
+        # Calcular tiempos
+        logger.info("⏱️ Calculando métricas de tiempo")
+        df["Captura de Cargos"] = df["Fecha Enviado"] - df["Fecha Creación"]
+        df["Tiempo Robot"] = df["Fecha Atendido"] - df["Fecha Asignacion"]
+        
+        # Convertir a segundos
+        df["Captura de Cargos segundos"] = df["Captura de Cargos"].dt.total_seconds()
+        df["Tiempo Robot segundos"] = df["Tiempo Robot"].dt.total_seconds()
+        
+        # Categorizar tiempos
+        df["Captura de Cargos categoria"] = df["Captura de Cargos segundos"].apply(categorizar_tiempo)
+        df["Tiempo Robot Categoria"] = df["Tiempo Robot segundos"].apply(categorizar_tiempo)
+        df["Aclaración"] = 1
+        
+        # Asegurar que todas las columnas finales existan
+        for col in COLUMNAS_FINALES:
+            if col not in df.columns:
+                logger.warning(f"Columna {col} no encontrada, se agregará vacía")
+                df[col] = None
+        
+        # Reordenar columnas
+        df = df[COLUMNAS_FINALES]
+        
+        # Guardar en Excel
+        logger.info(f"💾 Guardando reporte en: {ARCHIVO_SALIDA}")
+        with pd.ExcelWriter(ARCHIVO_SALIDA, engine="openpyxl") as writer:
+            df.to_excel(writer, sheet_name=HOJA_REPORTE, index=False)
+            if not df_usuario_no.empty:
+                df_usuario_no.to_excel(writer, sheet_name=HOJA_USUARIO_NO_ENCONTRADO, index=False)
+            if not df_duplicados.empty:
+                df_duplicados.to_excel(writer, sheet_name=HOJA_DUPLICADOS, index=False)
+        
+        # Aplicar estilos y crear resumen
+        logger.info("🎨 Aplicando estilos y creando resumen")
+        wb = load_workbook(ARCHIVO_SALIDA)
+        
+        # Crear resumen si hay datos
+        if not df.empty:
+            crear_resumen_por_agente(wb, df)
+        
+        # Aplicar estilos a todas las hojas
+        for sheet_name in wb.sheetnames:
+            aplicar_estilos(wb[sheet_name])
+        
+        # Guardar cambios
+        wb.save(ARCHIVO_SALIDA)
+        
+        logger.info(f"✅ Reporte generado exitosamente: {ARCHIVO_SALIDA}")
+        logger.info(f"   - Registros procesados: {len(df)}")
+        logger.info(f"   - Usuarios no encontrados: {len(df_usuario_no)}")
+        logger.info(f"   - Duplicados encontrados: {len(df_duplicados)}")
+        
+    except FileNotFoundError as e:
+        logger.error(f"❌ Error de archivo: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error inesperado: {e}", exc_info=True)
+        raise
 
 # =========================
 # EJECUCIÓN
 # =========================
 if __name__ == "__main__":
-    generar_reporte()
+    generar_reporte_dev()
