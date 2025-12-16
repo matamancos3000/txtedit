@@ -109,12 +109,11 @@ def generar_reporte_dev():
     # =========================
     df = df.sort_values("Fecha")
     duplicados = df[df.duplicated("AclaracionID", keep="first")]
-
     df_duplicados = duplicados.copy()
     df = df.drop(duplicados.index)
 
     # =========================
-    # TIEMPOS (CORREGIDOS)
+    # TIEMPOS
     # =========================
     df["Captura de Cargos"] = df["Fecha Enviado"] - df["Fecha Creación"]
     df["Tiempo Robot"] = df["Fecha Atendido"] - df["Fecha Asignacion"]
@@ -147,24 +146,28 @@ def generar_reporte_dev():
             row[0].number_format = "[mm]:ss"
 
     # =========================
-    # FORMATO CONDICIONAL
+    # FORMATO CONDICIONAL (AHORA EN TIEMPOS)
     # =========================
-    for col_name in ["Captura de Cargos segundo", "Tiempo Robot segundos"]:
+    for col_name in ["Captura de Cargos", "Tiempo Robot"]:
         col_idx = df.columns.get_loc(col_name) + 1
         letra = ws.cell(row=1, column=col_idx).column_letter
-        rule = ColorScaleRule(
-            start_type="min", start_color="63BE7B",
-            mid_type="percentile", mid_value=50, mid_color="FFEB84",
-            end_type="max", end_color="F8696B"
+
+        regla = ColorScaleRule(
+            start_type="min", start_color="63BE7B",   # Verde = rápido
+            mid_type="percentile", mid_value=50, mid_color="FFEB84",  # Amarillo
+            end_type="max", end_color="F8696B"       # Rojo = lento
         )
-        ws.conditional_formatting.add(f"{letra}2:{letra}{ws.max_row}", rule)
+
+        ws.conditional_formatting.add(
+            f"{letra}2:{letra}{ws.max_row}",
+            regla
+        )
 
     aplicar_estilos(ws)
     aplicar_estilos(wb[HOJA_USUARIO_NO_ENCONTRADO])
     aplicar_estilos(wb[HOJA_DUPLICADOS])
 
     wb.save(ARCHIVO_SALIDA)
-
     logger.info("✅ Reporte DEV generado correctamente")
 
 # =========================
