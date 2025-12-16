@@ -30,8 +30,9 @@ HOJA_RESUMEN = "Resumen por Agente"
 
 COLUMNAS_FINALES = [
     "ENTORNO","Fecha","Tipo de tarjeta","Tipo de aclaracion","Detalles de aclaracion",
-    "Numero de registro","NOMBRE","Supervisor","Site","Skill","Folio","CIS","Cargos",
-    "AclaracionID","Fecha Creación","Fecha Enviado","Fecha Asignacion","Fecha Atendido",
+    "Numero de registro","NOMBRE","Supervisor","Site","Skill",
+    "Folio","CIS","Cargos","AclaracionID",
+    "Fecha Creación","Fecha Enviado","Fecha Asignacion","Fecha Atendido",
     "Captura de Cargos","Tiempo Robot","Aclaración",
     "Captura de Cargos segundos","Tiempo Robot segundos",
     "Captura de Cargos categoria","Tiempo Robot Categoria"
@@ -40,15 +41,14 @@ COLUMNAS_FINALES = [
 # =========================
 # FUNCIONES
 # =========================
-def convertir_fecha_universal(col):
+def convertir_fecha(col):
     formatos = [
-        "%d/%m/%Y %H:%M","%d/%m/%Y %H:%M:%S",
-        "%d/%m/%Y %I:%M:%S %p","%d/%m/%Y %I:%M %p",
-        "%Y-%m-%d %H:%M:%S","%d/%m/%Y"
+        "%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %I:%M %p",
+        "%Y-%m-%d %H:%M:%S", "%d/%m/%Y"
     ]
     def parse(v):
         if pd.isna(v): return pd.NaT
-        if isinstance(v, (datetime, pd.Timestamp)): return v
         for f in formatos:
             try: return datetime.strptime(str(v).strip(), f)
             except: pass
@@ -62,39 +62,52 @@ def categorizar(seg):
     if seg > 90: return "1.5 a 3 minutos"
     return "Menor a 1.5 minutos"
 
-def auto_width(ws):
+def aplicar_estilos(ws):
+    header_fill = PatternFill("solid", fgColor="C00000")
+    header_font = Font(color="FFFFFF", bold=True, name="Calibri")
+    center = Alignment(horizontal="center", vertical="center")
+
+    for c in ws[1]:
+        c.fill = header_fill
+        c.font = header_font
+        c.alignment = center
+
+    for row in ws.iter_rows(min_row=2):
+        for c in row:
+            c.font = Font(name="Calibri")
+            c.alignment = center
+
     for col in ws.columns:
-        width = max(len(str(c.value)) if c.value else 0 for c in col)
-        ws.column_dimensions[col[0].column_letter].width = width + 2
+        ws.column_dimensions[col[0].column_letter].width = max(
+            len(str(c.value)) if c.value else 0 for c in col
+        ) + 2
 
 # =========================
 # PROCESO PRINCIPAL
 # =========================
 def generar_reporte():
-    logger.info("🚀 Generando Reporte DEV Aclarapp")
+    logger.info("🚀 Generando Reporte DEV completo")
 
     df = pd.read_excel(ARCHIVO_ENTRADA, sheet_name=HOJA_ORIGEN)
 
-    # FECHAS
+    # Fechas
     for c in ["Fecha","Fecha Creación","Fecha Enviado","Fecha Asignacion","Fecha Atendido"]:
-        if c in df.columns:
-            df[c] = convertir_fecha_universal(df[c])
+        df[c] = convertir_fecha(df[c])
 
-    # TEXTO
-    for c in ["Folio","CIS"]:
-        if c in df.columns:
-            df[c] = df[c].astype(str)
+    # Texto forzado
+    df["Folio"] = df["Folio"].astype(str)
+    df["CIS"] = df["CIS"].astype(str)
 
-    # USUARIOS SIN NOMBRE
-    df_usuario_no = df[df["NOMBRE"].isna() | (df["NOMBRE"].astype(str).str.strip()=="")]
+    # Usuarios sin nombre
+    df_usuario_no = df[df["NOMBRE"].isna() | (df["NOMBRE"].str.strip() == "")]
     df = df.drop(df_usuario_no.index)
 
-    # DUPLICADOS (CONSERVAR MÁS ANTIGUO)
+    # Duplicados (conservar más antiguo)
     df = df.sort_values("Fecha")
-    df_dup = df[df.duplicated("AclaracionID", keep="first")]
-    df = df.drop(df_dup.index)
+    df_duplicados = df[df.duplicated("AclaracionID", keep="first")]
+    df = df.drop(df_duplicados.index)
 
-    # TIEMPOS
+    # Tiempos
     df["Captura de Cargos"] = df["Fecha Enviado"] - df["Fecha Creación"]
     df["Tiempo Robot"] = df["Fecha Atendido"] - df["Fecha Asignacion"]
 
@@ -112,94 +125,34 @@ def generar_reporte():
 
     df = df[COLUMNAS_FINALES]
 
-    # =========================
-    # EXPORTAR
-    # =========================
     with pd.ExcelWriter(ARCHIVO_SALIDA, engine="openpyxl", datetime_format="DD/MM/YYYY") as writer:
-        df.to_excel(writer, HOJA_REPORTE, index=False)
-        df_usuario_no.to_excel(writer, HOJA_USUARIO_NO, index=False)
-        df_dup.to_excel(writer, HOJA_DUPLICADOS, index=False)
+        df.to_excel(writer, sheet_name=HOJA_REPORTE, index=False)
+        df_usuario_no.to_excel(writer, sheet_name=HOJA_USUARIO_NO, index=False)
+        df_duplicados.to_excel(writer, sheet_name=HOJA_DUPLICADOS, index=False)
 
     wb = load_workbook(ARCHIVO_SALIDA)
-
-    # =========================
-    # ESTILOS REPORTE
-    # =========================
     ws = wb[HOJA_REPORTE]
 
-    header = PatternFill("solid", fgColor="C00000")
-    font_w = Font(color="FFFFFF", bold=True)
-    center = Alignment(horizontal="center", vertical="center")
-
-    for c in ws[1]:
-        c.fill = header
-        c.font = font_w
-        c.alignment = center
-
+    # mm:ss + escala colores
     for col in ["Captura de Cargos","Tiempo Robot"]:
         idx = COLUMNAS_FINALES.index(col)+1
-        letra = get_column_letter(idx)
-        for cell in ws[letra][1:]:
-            cell.number_format = "[mm]:ss"
+        letra = ws.cell(row=1,column=idx).column_letter
+        for c in ws[letra][1:]:
+            c.number_format = "[mm]:ss"
 
-        ws.conditional_formatting.add(
-            f"{letra}2:{letra}{ws.max_row}",
-            ColorScaleRule(
-                start_type="min", start_color="63BE7B",
-                mid_type="percentile", mid_value=50, mid_color="FFEB84",
-                end_type="max", end_color="F8696B"
-            )
+        regla = ColorScaleRule(
+            start_type="min", start_color="63BE7B",
+            mid_type="percentile", mid_value=50, mid_color="FFEB84",
+            end_type="max", end_color="F8696B"
         )
+        ws.conditional_formatting.add(f"{letra}2:{letra}{ws.max_row}", regla)
 
-    auto_width(ws)
-
-    # =========================
-    # RESUMEN POR AGENTE
-    # =========================
-    df["Dia"] = df["Fecha"].dt.strftime("%d-%b")
-    pivot = pd.pivot_table(
-        df, values="Aclaración",
-        index=["Numero de registro","NOMBRE","Supervisor","Site","Skill"],
-        columns="Dia", aggfunc="sum", fill_value=0
-    )
-    pivot["Total"] = pivot.sum(axis=1)
-    pivot.reset_index(inplace=True)
-
-    pivot.to_excel(wb, HOJA_RESUMEN, index=False)
-    ws = wb[HOJA_RESUMEN]
-    ws.sheet_view.showGridLines = False
-
-    borde = Border(
-        left=Side(style="thin", color="FFFFFF"),
-        right=Side(style="thin", color="FFFFFF"),
-        top=Side(style="thin", color="FFFFFF"),
-        bottom=Side(style="thin", color="FFFFFF"),
-    )
-
-    for row in ws.iter_rows():
-        for c in row:
-            c.border = borde
-            c.alignment = center
-
-    for c in ws[1]:
-        c.fill = header
-        c.font = font_w
-
-    ult_col = ws.max_column
-    ws.conditional_formatting.add(
-        f"{get_column_letter(6)}2:{get_column_letter(ult_col)}{ws.max_row}",
-        DataBarRule(start_type="min", end_type="max", color="FFD966")
-    )
-
-    ws.conditional_formatting.add(
-        f"{get_column_letter(ult_col)}2:{get_column_letter(ult_col)}{ws.max_row}",
-        DataBarRule(start_type="min", end_type="max", color="63BE7B")
-    )
-
-    auto_width(ws)
+    aplicar_estilos(ws)
+    aplicar_estilos(wb[HOJA_USUARIO_NO])
+    aplicar_estilos(wb[HOJA_DUPLICADOS])
 
     wb.save(ARCHIVO_SALIDA)
-    logger.info("✅ REPORTE COMPLETO GENERADO")
+    logger.info("✅ Reporte generado correctamente")
 
 # =========================
 # EJECUCIÓN
