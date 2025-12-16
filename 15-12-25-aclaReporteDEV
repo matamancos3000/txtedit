@@ -27,6 +27,37 @@ HOJA_USUARIO_NO_ENCONTRADO = "Usuario no Encontrado"
 HOJA_DUPLICADOS = "AclaracionID duplicadas"
 
 # =========================
+# ORDEN FINAL BLINDADO
+# =========================
+COLUMNAS_FINALES = [
+    "ENTORNO",
+    "Fecha",
+    "Tipo de tarjeta",
+    "Tipo de aclaracion",
+    "Detalles de aclaracion",
+    "Numero de registro",
+    "NOMBRE",
+    "Supervisor",
+    "Site",
+    "Skill",
+    "Folio",
+    "CIS",
+    "Cargos",
+    "AclaracionID",
+    "Fecha Creación",
+    "Fecha Enviado",
+    "Fecha Asignacion",
+    "Fecha Atendido",
+    "Captura de Cargos",
+    "Tiempo Robot",
+    "Aclaración",
+    "Captura de Cargos segundos",
+    "Tiempo Robot segundos",
+    "Captura de Cargos categoria",
+    "Tiempo Robot Categoria"
+]
+
+# =========================
 # FUNCIONES
 # =========================
 def convertir_fecha_universal(col):
@@ -38,6 +69,7 @@ def convertir_fecha_universal(col):
         "%Y-%m-%d %H:%M:%S",
         "%d/%m/%Y"
     ]
+
     def parse(v):
         if pd.isna(v):
             return pd.NaT
@@ -49,6 +81,7 @@ def convertir_fecha_universal(col):
             except:
                 pass
         return pd.to_datetime(v, dayfirst=True, errors="coerce")
+
     return col.apply(parse)
 
 def categorizar_tiempo(seg):
@@ -89,14 +122,25 @@ def generar_reporte_dev():
 
     df = pd.read_excel(ARCHIVO_ENTRADA, sheet_name=HOJA_ORIGEN)
 
-    # Convertir fechas
-    for col in ["Fecha", "Fecha Creación", "Fecha Enviado", "Fecha Asignacion", "Fecha Atendido"]:
+    # =========================
+    # FECHAS
+    # =========================
+    for col in [
+        "Fecha",
+        "Fecha Creación",
+        "Fecha Enviado",
+        "Fecha Asignacion",
+        "Fecha Atendido"
+    ]:
         if col in df.columns:
             df[col] = convertir_fecha_universal(df[col])
 
-    # Texto forzado
-    df["Folio"] = df["Folio"].astype(str)
-    df["CIS"] = df["CIS"].astype(str)
+    # =========================
+    # TEXTO FORZADO
+    # =========================
+    for col in ["Folio", "CIS"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str)
 
     # =========================
     # USUARIOS SIN NOMBRE
@@ -105,12 +149,11 @@ def generar_reporte_dev():
     df = df.drop(df_usuario_no.index)
 
     # =========================
-    # DUPLICADOS (CONSERVAR EL MÁS ANTIGUO)
+    # DUPLICADOS (CONSERVAR MÁS ANTIGUO)
     # =========================
     df = df.sort_values("Fecha")
-    duplicados = df[df.duplicated("AclaracionID", keep="first")]
-    df_duplicados = duplicados.copy()
-    df = df.drop(duplicados.index)
+    df_duplicados = df[df.duplicated("AclaracionID", keep="first")]
+    df = df.drop(df_duplicados.index)
 
     # =========================
     # TIEMPOS
@@ -118,13 +161,22 @@ def generar_reporte_dev():
     df["Captura de Cargos"] = df["Fecha Enviado"] - df["Fecha Creación"]
     df["Tiempo Robot"] = df["Fecha Atendido"] - df["Fecha Asignacion"]
 
-    df["Captura de Cargos segundo"] = df["Captura de Cargos"].dt.total_seconds()
+    df["Captura de Cargos segundos"] = df["Captura de Cargos"].dt.total_seconds()
     df["Tiempo Robot segundos"] = df["Tiempo Robot"].dt.total_seconds()
 
-    df["Captura de Cargos categoria"] = df["Captura de Cargos segundo"].apply(categorizar_tiempo)
+    df["Captura de Cargos categoria"] = df["Captura de Cargos segundos"].apply(categorizar_tiempo)
     df["Tiempo Robot Categoria"] = df["Tiempo Robot segundos"].apply(categorizar_tiempo)
 
     df["Aclaración"] = 1
+
+    # =========================
+    # BLINDAR COLUMNAS
+    # =========================
+    for col in COLUMNAS_FINALES:
+        if col not in df.columns:
+            df[col] = None
+
+    df = df[COLUMNAS_FINALES]
 
     # =========================
     # EXPORTAR
@@ -141,27 +193,24 @@ def generar_reporte_dev():
     # FORMATO mm:ss
     # =========================
     for col_name in ["Captura de Cargos", "Tiempo Robot"]:
-        col_idx = df.columns.get_loc(col_name) + 1
-        for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
+        idx = COLUMNAS_FINALES.index(col_name) + 1
+        for row in ws.iter_rows(min_row=2, min_col=idx, max_col=idx):
             row[0].number_format = "[mm]:ss"
 
     # =========================
-    # FORMATO CONDICIONAL (AHORA EN TIEMPOS)
+    # FORMATO CONDICIONAL
     # =========================
     for col_name in ["Captura de Cargos", "Tiempo Robot"]:
-        col_idx = df.columns.get_loc(col_name) + 1
-        letra = ws.cell(row=1, column=col_idx).column_letter
+        idx = COLUMNAS_FINALES.index(col_name) + 1
+        letra = ws.cell(row=1, column=idx).column_letter
 
         regla = ColorScaleRule(
-            start_type="min", start_color="63BE7B",   # Verde = rápido
-            mid_type="percentile", mid_value=50, mid_color="FFEB84",  # Amarillo
-            end_type="max", end_color="F8696B"       # Rojo = lento
+            start_type="min", start_color="63BE7B",
+            mid_type="percentile", mid_value=50, mid_color="FFEB84",
+            end_type="max", end_color="F8696B"
         )
 
-        ws.conditional_formatting.add(
-            f"{letra}2:{letra}{ws.max_row}",
-            regla
-        )
+        ws.conditional_formatting.add(f"{letra}2:{letra}{ws.max_row}", regla)
 
     aplicar_estilos(ws)
     aplicar_estilos(wb[HOJA_USUARIO_NO_ENCONTRADO])
