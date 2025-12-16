@@ -53,15 +53,30 @@ COLUMNAS_AUDITORIA = [
     "Folio",
     "CIS",
     "Cargos",
-    "AclaracionID"
+    "AclaracionID"  # solo para eliminar duplicados
 ]
 
 # =========================
 # ESTILOS (MODIFICABLES)
 # =========================
-HEADER_FILL_COLOR = "FF0000"   # Rojo
-HEADER_FONT_COLOR = "FFFFFF"   # Blanco
+HEADER_FILL_COLOR = "FF0000"
+HEADER_FONT_COLOR = "FFFFFF"
 FONT_NAME = "Calibri"
+
+# =========================
+# FUNCIÓN AUXILIAR
+# =========================
+def convertir_fecha_mixta(serie_fecha):
+    """
+    Convierte fechas con formatos mixtos a datetime.
+    Soporta AM/PM, 24h, con o sin segundos.
+    """
+    return pd.to_datetime(
+        serie_fecha,
+        dayfirst=True,
+        infer_datetime_format=True,
+        errors="coerce"
+    )
 
 # =========================
 # FUNCIÓN PRINCIPAL
@@ -102,13 +117,9 @@ def generar_reporte_auditoria():
     df = df[COLUMNAS_AUDITORIA]
 
     # =========================
-    # 5. CONVERTIR FECHA
+    # 5. CONVERTIR FECHA (ROBUSTO)
     # =========================
-    df["Fecha"] = pd.to_datetime(
-        df["Fecha"],
-        format="%d/%m/%Y %H:%M",
-        errors="coerce"
-    )
+    df["Fecha"] = convertir_fecha_mixta(df["Fecha"])
 
     # =========================
     # 6. ORDENAR POR FECHA
@@ -136,7 +147,7 @@ def generar_reporte_auditoria():
         ws = writer.book[SHEET_OUTPUT]
 
         # =========================
-        # 8. ESTILOS DE ENCABEZADO
+        # 8. ESTILO DE ENCABEZADOS
         # =========================
         header_font = Font(
             name=FONT_NAME,
@@ -160,14 +171,14 @@ def generar_reporte_auditoria():
             cell.number_format = "DD/MM/YYYY"
 
         # =========================
-        # 10. AUTOAJUSTAR ANCHO
+        # 10. AUTOAJUSTE DE ANCHO
         # =========================
         for col in ws.columns:
             max_length = 0
             col_letter = get_column_letter(col[0].column)
 
             for cell in col:
-                if cell.value:
+                if cell.value is not None:
                     max_length = max(max_length, len(str(cell.value)))
 
             ws.column_dimensions[col_letter].width = max_length + 2
@@ -184,5 +195,5 @@ if __name__ == "__main__":
     try:
         generar_reporte_auditoria()
     except Exception as e:
-        logger.error(f"❌ Error: {e}")
+        logger.error(f"❌ Error fatal: {e}")
         raise
