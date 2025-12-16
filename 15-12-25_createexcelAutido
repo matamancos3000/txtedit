@@ -15,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # =========================
-# CONFIG
+# CONFIGURACIÓN
 # =========================
 BASE_PATH = Path("c:/Copia-reporte-Aclarabot/Reporte_Excel")
 MES_ANIO = datetime.now().strftime("%b-%Y")
@@ -26,7 +26,7 @@ ARCHIVO_SALIDA = BASE_PATH / MES_ANIO / f"Reporte_Aclarapp_{MES_ANIO}.xlsx"
 HOJA_ORIGEN = "Reporte_Completo"
 HOJA_DESTINO = "Reporte Aclarapp"
 
-COLUMNAS = [
+COLUMNAS_AUDITORIA = [
     "Fecha",
     "Tipo de tarjeta",
     "Tipo de aclaración",
@@ -41,22 +41,25 @@ COLUMNAS = [
 ]
 
 # =========================
-# FECHA UNIVERSAL
+# FUNCIÓN FECHA UNIVERSAL
 # =========================
 def convertir_fecha_universal(col):
     def parse_fecha(valor):
         if pd.isna(valor):
             return pd.NaT
 
+        # Ya es datetime
         if isinstance(valor, (pd.Timestamp, datetime)):
             return valor
 
+        # Fecha serial de Excel
         if isinstance(valor, (int, float)):
             try:
                 return pd.to_datetime(valor, unit="d", origin="1899-12-30")
             except:
                 return pd.NaT
 
+        # Texto
         if isinstance(valor, str):
             valor = valor.strip()
 
@@ -67,6 +70,7 @@ def convertir_fecha_universal(col):
                 "%d/%m/%Y %I:%M %p",
                 "%Y-%m-%d %H:%M:%S",
                 "%Y-%m-%d %H:%M",
+                "%d/%m/%Y"
             ]
 
             for fmt in formatos:
@@ -75,6 +79,7 @@ def convertir_fecha_universal(col):
                 except ValueError:
                     pass
 
+            # Último intento automático
             try:
                 return pd.to_datetime(valor, dayfirst=True, errors="coerce")
             except:
@@ -85,26 +90,43 @@ def convertir_fecha_universal(col):
     return col.apply(parse_fecha)
 
 # =========================
-# MAIN
+# PROCESO PRINCIPAL
 # =========================
 def generar_reporte_auditoria():
     logger.info("🚀 Generando reporte de auditoría")
 
+    if not ARCHIVO_ENTRADA.exists():
+        raise FileNotFoundError(f"No existe el archivo base: {ARCHIVO_ENTRADA}")
+
+    # =========================
+    # 1. LEER EXCEL BASE
+    # =========================
     df = pd.read_excel(
         ARCHIVO_ENTRADA,
         sheet_name=HOJA_ORIGEN
     )
 
-    df = df[[c for c in COLUMNAS if c in df.columns]]
+    logger.info(f"Registros iniciales: {len(df)}")
 
-    # Eliminar duplicados
+    # =========================
+    # 2. FILTRAR COLUMNAS
+    # =========================
+    df = df[[c for c in COLUMNAS_AUDITORIA if c in df.columns]]
+
+    # =========================
+    # 3. ELIMINAR DUPLICADOS
+    # =========================
     if "AclaracionID" in df.columns:
         df = df.drop_duplicates(subset="AclaracionID")
 
-    # Convertir fecha (FIX REAL)
+    # =========================
+    # 4. CONVERTIR FECHA
+    # =========================
     df["Fecha"] = convertir_fecha_universal(df["Fecha"])
 
-    # Eliminar pruebas sin nombre
+    # =========================
+    # 5. ELIMINAR PRUEBAS (SIN NOMBRE)
+    # =========================
     df["NOMBRE"] = df["NOMBRE"].astype(str).str.strip()
     df = df[
         df["NOMBRE"].notna() &
@@ -112,10 +134,16 @@ def generar_reporte_auditoria():
         (df["NOMBRE"].str.lower() != "nan")
     ]
 
-    # Ordenar por fecha
-    df = df.sort_values("Fecha")
+    # =========================
+    # 6. ORDENAR POR FECHA
+    # =========================
+    df = df.sort_values("Fecha", ascending=True)
 
-    # Exportar
+    logger.info(f"Registros finales auditoría: {len(df)}")
+
+    # =========================
+    # 7. EXPORTAR A EXCEL
+    # =========================
     with pd.ExcelWriter(
         ARCHIVO_SALIDA,
         engine="openpyxl",
@@ -127,10 +155,13 @@ def generar_reporte_auditoria():
             index=False
         )
 
-    # Estilos
+    # =========================
+    # 8. FORMATO EXCEL
+    # =========================
     wb = load_workbook(ARCHIVO_SALIDA)
     ws = wb[HOJA_DESTINO]
 
+    # Encabezados
     header_fill = PatternFill("solid", fgColor="FF0000")
     header_font = Font(color="FFFFFF", bold=True, name="Calibri")
 
@@ -138,19 +169,28 @@ def generar_reporte_auditoria():
         cell.fill = header_fill
         cell.font = header_font
 
+    # Fuente general
     for row in ws.iter_rows(min_row=2):
         for cell in row:
             cell.font = Font(name="Calibri")
 
+    # Forzar fecha corta en columna Fecha
+    for row in ws.iter_rows(min_row=2):
+        if isinstance(row[0].value, (datetime, pd.Timestamp)):
+            row[0].number_format = "DD/MM/YYYY"
+
+    # Auto ancho de columnas
     for col in ws.columns:
         max_len = max(len(str(c.value)) if c.value else 0 for c in col)
         ws.column_dimensions[col[0].column_letter].width = max_len + 2
 
     wb.save(ARCHIVO_SALIDA)
 
-    logger.info("✅ Reporte de auditoría listo")
+    logger.info("✅ Reporte de auditoría generado correctamente")
+    logger.info(f"📄 Archivo: {ARCHIVO_SALIDA.name}")
 
+# =========================
+# EJECUCIÓN
 # =========================
 if __name__ == "__main__":
     generar_reporte_auditoria()
- 
