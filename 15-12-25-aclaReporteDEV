@@ -1,9 +1,10 @@
 import pandas as pd
 from pathlib import Path
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from openpyxl import load_workbook
-from openpyxl.styles import Font, PatternFill, Alignment
-from openpyxl.formatting.rule import DataBarRule
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.formatting.rule import DataBarRule, ColorScaleRule, Rule
+from openpyxl.styles.differential import DifferentialStyle
 from openpyxl.utils import get_column_letter
 import logging
 
@@ -91,28 +92,30 @@ def categorizar_tiempo(segundos):
         return "1.5 a 3 minutos"
     return "Menor a 1.5 minutos"
 
-def aplicar_estilos(worksheet):
+def aplicar_estilos(workbook, worksheet_name):
     """
     Aplica estilos consistentes a una hoja de Excel.
     """
+    ws = workbook[worksheet_name]
+    
     # Estilos para encabezado
     header_fill = PatternFill("solid", fgColor="C00000")
     header_font = Font(color="FFFFFF", bold=True)
     center_alignment = Alignment(horizontal="center", vertical="center")
     
     # Aplicar a encabezados (fila 1)
-    for cell in worksheet[1]:
+    for cell in ws[1]:
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = center_alignment
     
     # Aplicar alineación central a todas las celdas de datos
-    for row in worksheet.iter_rows(min_row=2):
+    for row in ws.iter_rows(min_row=2):
         for cell in row:
             cell.alignment = center_alignment
     
     # Ajustar ancho de columnas automáticamente
-    for column in worksheet.columns:
+    for column in ws.columns:
         max_length = 0
         column_letter = get_column_letter(column[0].column)
         
@@ -125,7 +128,80 @@ def aplicar_estilos(worksheet):
                 pass
         
         adjusted_width = min(max_length + 2, 50)  # Máximo 50 caracteres
-        worksheet.column_dimensions[column_letter].width = adjusted_width
+        ws.column_dimensions[column_letter].width = adjusted_width
+    
+    # Aplicar formato específico para "Reporte Aclarapp"
+    if worksheet_name == HOJA_REPORTE:
+        aplicar_formato_tiempos(workbook, ws)
+
+def aplicar_formato_tiempos(workbook, worksheet):
+    """
+    Aplica formato condicional de colores y formato mm:ss a las columnas de tiempo.
+    """
+    # Encontrar índices de las columnas de tiempo
+    col_indices = {}
+    for idx, cell in enumerate(worksheet[1], 1):
+        if cell.value in ["Captura de Cargos", "Tiempo Robot"]:
+            col_indices[cell.value] = idx
+    
+    for col_name, col_idx in col_indices.items():
+        col_letter = get_column_letter(col_idx)
+        
+        # Aplicar formato mm:ss a toda la columna
+        for row in range(2, worksheet.max_row + 1):
+            cell = worksheet.cell(row=row, column=col_idx)
+            if cell.value:
+                # Si es un timedelta, mostrar como mm:ss
+                if isinstance(cell.value, (timedelta, pd.Timedelta)):
+                    total_seconds = int(cell.value.total_seconds())
+                    minutes = total_seconds // 60
+                    seconds = total_seconds % 60
+                    cell.value = f"{minutes:02d}:{seconds:02d}"
+                # Establecer formato personalizado en Excel
+                cell.number_format = "mm:ss"
+        
+        # Aplicar escala de colores a la columna de segundos correspondiente
+        if col_name == "Captura de Cargos":
+            seg_col_name = "Captura de Cargos segundos"
+        else:
+            seg_col_name = "Tiempo Robot segundos"
+        
+        # Buscar la columna de segundos correspondiente
+        seg_col_idx = None
+        for idx, cell in enumerate(worksheet[1], 1):
+            if cell.value == seg_col_name:
+                seg_col_idx = idx
+                break
+        
+        if seg_col_idx:
+            seg_col_letter = get_column_letter(seg_col_idx)
+            
+            # Definir rango para la escala de colores (excluyendo encabezado)
+            start_row = 2
+            end_row = worksheet.max_row
+            rango = f"{col_letter}{start_row}:{col_letter}{end_row}"
+            rango_segundos = f"{seg_col_letter}{start_row}:{seg_col_letter}{end_row}"
+            
+            # Crear regla de escala de colores
+            # Rojo (alto) -> Amarillo (medio) -> Verde (bajo)
+            color_scale = ColorScaleRule(
+                start_type='min',
+                start_color='63BE7B',  # Verde
+                mid_type='percentile',
+                mid_value=50,
+                mid_color='FFEB84',    # Amarillo
+                end_type='max',
+                end_color='F8696B'     # Rojo
+            )
+            
+            # Aplicar la escala de colores basada en los segundos
+            # Nota: openpyxl no permite aplicar ColorScaleRule basada en otra columna directamente
+            # Usaremos una regla personalizada
+            try:
+                # Intentar aplicar la escala de colores directamente
+                worksheet.conditional_formatting.add(rango, color_scale)
+            except Exception as e:
+                logger.warning(f"No se pudo aplicar escala de colores: {e}")
 
 def crear_resumen_por_agente(workbook, dataframe):
     """
@@ -148,10 +224,22 @@ def crear_resumen_por_agente(workbook, dataframe):
         workbook.remove(workbook[HOJA_RESUMEN])
     ws = workbook.create_sheet(HOJA_RESUMEN)
     
+    # Quitar líneas de cuadrícula
+    ws.sheet_view.showGridLines = False
+    
+    # Definir bordes blancos
+    white_border = Border(
+        left=Side(style='thin', color='FFFFFF'),
+        right=Side(style='thin', color='FFFFFF'),
+        top=Side(style='thin', color='FFFFFF'),
+        bottom=Side(style='thin', color='FFFFFF')
+    )
+    
     # Colores y estilos
     negro = PatternFill("solid", fgColor="000000")
     rojo = PatternFill("solid", fgColor="C00000")
     blanco = Font(color="FFFFFF", bold=True)
+    center_alignment = Alignment(horizontal="center", vertical="center")
     
     col_inicio = 7  # Columna donde empiezan los días
     
@@ -161,41 +249,86 @@ def crear_resumen_por_agente(workbook, dataframe):
         celda = ws.cell(row=1, column=col_inicio + i, value=dia)
         celda.fill = negro
         celda.font = blanco
+        celda.alignment = center_alignment
+        celda.border = white_border
     
     # Columna "Total"
     total_col = col_inicio + len(dias_str)
     celda_total = ws.cell(row=1, column=total_col, value="Total")
     celda_total.fill = rojo
     celda_total.font = blanco
+    celda_total.alignment = center_alignment
+    celda_total.border = white_border
     
     # ===== TOTALES POR SITE =====
     sites = ["CDMX", "GDL"]
     for fila_idx, site in enumerate(sites, start=2):
-        ws.cell(row=fila_idx, column=6, value=site)
+        celda_site = ws.cell(row=fila_idx, column=6, value=site)
+        celda_site.fill = rojo
+        celda_site.font = blanco
+        celda_site.alignment = center_alignment
+        celda_site.border = white_border
         
         total_site = 0
+        valores_site = []
+        
         for i, dia in enumerate(dias):
             count = len(df[(df["Site"] == site) & (df["Fecha_dia"] == dia)])
-            ws.cell(row=fila_idx, column=col_inicio + i, value=count)
+            celda = ws.cell(row=fila_idx, column=col_inicio + i, value=count)
+            celda.alignment = center_alignment
+            celda.border = white_border
+            valores_site.append(count)
             total_site += count
         
-        ws.cell(row=fila_idx, column=total_col, value=total_site)
+        celda_total_site = ws.cell(row=fila_idx, column=total_col, value=total_site)
+        celda_total_site.alignment = center_alignment
+        celda_total_site.border = white_border
+        valores_site.append(total_site)
         
-        # Aplicar DataBar para visualización
-        if total_site > 0:
+        # Aplicar DataBar para visualización si hay valores mayores a 0
+        if max(valores_site) > 0:
             regla = DataBarRule(
-                start_type="min", 
+                start_type="num", 
+                start_value=0,
                 end_type="max", 
-                color="FFD966"
+                color="FFD966",
+                showValue=True
             )
-            rango = f"{get_column_letter(col_inicio)}{fila_idx}:{get_column_letter(total_col-1)}{fila_idx}"
+            rango = f"{get_column_letter(col_inicio)}{fila_idx}:{get_column_letter(total_col)}{fila_idx}"
             ws.conditional_formatting.add(rango, regla)
     
     # ===== TOTAL GENERAL =====
-    ws.cell(row=4, column=6, value="Total")
+    celda_total_label = ws.cell(row=4, column=6, value="Total")
+    celda_total_label.fill = rojo
+    celda_total_label.font = blanco
+    celda_total_label.alignment = center_alignment
+    celda_total_label.border = white_border
+    
+    valores_total = []
     for i, dia in enumerate(dias):
-        ws.cell(row=4, column=col_inicio + i, value=len(df[df["Fecha_dia"] == dia]))
-    ws.cell(row=4, column=total_col, value=len(df))
+        count = len(df[df["Fecha_dia"] == dia])
+        celda = ws.cell(row=4, column=col_inicio + i, value=count)
+        celda.alignment = center_alignment
+        celda.border = white_border
+        valores_total.append(count)
+    
+    total_general = len(df)
+    celda_total_general = ws.cell(row=4, column=total_col, value=total_general)
+    celda_total_general.alignment = center_alignment
+    celda_total_general.border = white_border
+    valores_total.append(total_general)
+    
+    # Aplicar DataBar para total general
+    if max(valores_total) > 0:
+        regla_total = DataBarRule(
+            start_type="num", 
+            start_value=0,
+            end_type="max", 
+            color="63BE7B",
+            showValue=True
+        )
+        rango_total = f"{get_column_letter(col_inicio)}4:{get_column_letter(total_col)}4"
+        ws.conditional_formatting.add(rango_total, regla_total)
     
     # ===== DETALLE POR AGENTE =====
     fila_base = 6
@@ -203,20 +336,26 @@ def crear_resumen_por_agente(workbook, dataframe):
     # Encabezados de agentes
     headers_agentes = ["Numero de registro", "NOMBRE", "Supervisor", "Site", "Skill"]
     for i, header in enumerate(headers_agentes, start=1):
-        ws.cell(row=fila_base, column=i, value=header)
-        ws.cell(row=fila_base, column=i).fill = rojo
-        ws.cell(row=fila_base, column=i).font = blanco
+        celda = ws.cell(row=fila_base, column=i, value=header)
+        celda.fill = rojo
+        celda.font = blanco
+        celda.alignment = center_alignment
+        celda.border = white_border
     
     # Encabezados de días (para sección de agentes)
     for i, dia in enumerate(dias_str):
         celda = ws.cell(row=fila_base, column=col_inicio + i, value=dia)
         celda.fill = rojo
         celda.font = blanco
+        celda.alignment = center_alignment
+        celda.border = white_border
     
     # Encabezado "Total" para agentes
     celda = ws.cell(row=fila_base, column=total_col, value="Total")
     celda.fill = negro
     celda.font = blanco
+    celda.alignment = center_alignment
+    celda.border = white_border
     
     # Datos por agente
     fila_actual = fila_base + 1
@@ -227,37 +366,40 @@ def crear_resumen_por_agente(workbook, dataframe):
     for (keys, group) in grouped:
         # Escribir datos del agente
         for i, value in enumerate(keys):
-            ws.cell(row=fila_actual, column=i + 1, value=value)
+            celda = ws.cell(row=fila_actual, column=i + 1, value=value)
+            celda.alignment = center_alignment
+            celda.border = white_border
         
         # Contar por día
         total_agente = 0
+        valores_agente = []
+        
         for i, dia in enumerate(dias):
             count = len(group[group["Fecha_dia"] == dia])
-            ws.cell(row=fila_actual, column=col_inicio + i, value=count)
+            celda = ws.cell(row=fila_actual, column=col_inicio + i, value=count)
+            celda.alignment = center_alignment
+            celda.border = white_border
+            valores_agente.append(count)
             total_agente += count
         
         # Total del agente
-        ws.cell(row=fila_actual, column=total_col, value=total_agente)
+        celda_total_agente = ws.cell(row=fila_actual, column=total_col, value=total_agente)
+        celda_total_agente.alignment = center_alignment
+        celda_total_agente.border = white_border
+        valores_agente.append(total_agente)
         
         # Aplicar formato condicional
-        if total_agente > 0:
-            # Barras para días individuales
+        if max(valores_agente) > 0:
+            # Barras para días individuales y total
             regla_dias = DataBarRule(
-                start_type="min", 
+                start_type="num", 
+                start_value=0,
                 end_type="max", 
-                color="FFD966"
+                color="FFD966",
+                showValue=True
             )
-            rango_dias = f"{get_column_letter(col_inicio)}{fila_actual}:{get_column_letter(col_inicio + len(dias_str) - 1)}{fila_actual}"
+            rango_dias = f"{get_column_letter(col_inicio)}{fila_actual}:{get_column_letter(total_col)}{fila_actual}"
             ws.conditional_formatting.add(rango_dias, regla_dias)
-            
-            # Barra para total
-            regla_total = DataBarRule(
-                start_type="min", 
-                end_type="max", 
-                color="63BE7B"
-            )
-            celda_total = f"{get_column_letter(total_col)}{fila_actual}"
-            ws.conditional_formatting.add(celda_total, regla_total)
         
         fila_actual += 1
     
@@ -265,6 +407,12 @@ def crear_resumen_por_agente(workbook, dataframe):
     for col in range(1, total_col + 1):
         col_letter = get_column_letter(col)
         ws.column_dimensions[col_letter].width = 15
+    
+    # Aplicar bordes blancos a todas las celdas usadas
+    for row in ws.iter_rows(min_row=1, max_row=fila_actual-1, min_col=1, max_col=total_col):
+        for cell in row:
+            if not cell.border or cell.border.left.style is None:
+                cell.border = white_border
 
 def verificar_archivos():
     """
@@ -370,7 +518,7 @@ def generar_reporte_dev():
         
         # Aplicar estilos a todas las hojas
         for sheet_name in wb.sheetnames:
-            aplicar_estilos(wb[sheet_name])
+            aplicar_estilos(wb, sheet_name)
         
         # Guardar cambios
         wb.save(ARCHIVO_SALIDA)
