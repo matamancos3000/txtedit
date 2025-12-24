@@ -5,22 +5,24 @@ from datetime import datetime
 
 # ============================== CONFIG ==============================
 
-RUTA_BASE_ACLARABOT = r"\\hlah.adroot.hsbc\MX\RBWM\9870\CMU_preview\Proceso CMU\RPA Reporte y Cambio\Aclarabot"
+# 🔁 MÚLTIPLES RUTAS BASE PARA ACLARABOT (se prueban en orden)
+RUTAS_BASE_ACLARABOT = [
+    r"\\hlah.adroot.hsbc\MX\RBWM\9870\CMU_preview\Proceso CMU\RPA Reporte y Cambio\Aclarabot",
+    r"\\OTRA_RUTA\ALTERNATIVA\Aclarabot"  # ← cambia esta por la real
+]
+
 RUTA_DESTINO = "c:/Copia-reporte-Aclarabot"
 RUTA_ACLARAPP = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp.csv"
 
 ENTORNOS = ["DEV", "UAT", "PROD"]
 
-# Espacios raros (del web + Excel)
+# Espacios raros (web + Excel)
 ESPACIOS_RAROS = r"[\u00A0\u2000-\u200B\u3000]"
 
 # ============================== UTILIDADES ==============================
 
 def detectar_separador(linea):
-    """
-    Detecta el separador principal que usa una línea.
-    Prioridad: | → tab → espacios raros → espacios normales
-    """
+    """Detecta el separador principal de una línea."""
     if linea.count("|") >= 5:
         return "|"
     if "\t" in linea:
@@ -36,30 +38,21 @@ def separar_linea(linea, separador):
     """Separa una línea según el separador detectado."""
     if separador == "|":
         return [x.strip() for x in linea.split("|")]
-
     if separador == "\t":
         return linea.split("\t")
-
     if separador == "espacios_raros":
         return re.split(f"{ESPACIOS_RAROS}{{3,}}", linea.strip())
-
     if separador == "espacios_normales":
         return re.split(r"\s{3,}", linea.strip())
-
     return [linea.strip()]
-
 
 # ========================= EXTRAER TABLA ACLARAPP =========================
 
 def extraer_tabla_desde_texto(texto):
-    """
-    Extrae automáticamente la tabla pegada desde la web.
-    Ultra resistente a formatos basura.
-    """
+    """Extrae la tabla pegada desde la web (Aclarapp)."""
 
     lineas = texto.split("\n")
 
-    # Buscar encabezado real
     patrones_encabezado = [
         "ID Aclaración",
         "Registro",
@@ -68,7 +61,6 @@ def extraer_tabla_desde_texto(texto):
     ]
 
     inicio = None
-
     for i, linea in enumerate(lineas):
         if all(p in linea for p in patrones_encabezado):
             inicio = i
@@ -79,17 +71,14 @@ def extraer_tabla_desde_texto(texto):
         return None
 
     encabezado_linea = lineas[inicio].rstrip("\r")
-
     separador = detectar_separador(encabezado_linea)
 
     if separador is None:
         print("✗ No se detectó separador claro.")
         return None
 
-    # Separar encabezados encontrados
     encabezados = separar_linea(encabezado_linea, separador)
 
-    # Forzar encabezados correctos si se detectan mal
     encabezados_estandar = [
         'ID Aclaración', 'Registro', 'Folio', 'CIS',
         'Fecha Creación', 'Fecha Enviado',
@@ -100,10 +89,9 @@ def extraer_tabla_desde_texto(texto):
     if len(encabezados) < 5:
         encabezados = encabezados_estandar
 
-    # Leer filas de datos
     datos = []
 
-    for linea in lineas[inicio+1:]:
+    for linea in lineas[inicio + 1:]:
         if "Mostrando" in linea or "entradas" in linea:
             break
         if len(linea.strip()) < 5:
@@ -111,11 +99,9 @@ def extraer_tabla_desde_texto(texto):
 
         fila = separar_linea(linea, separador)
 
-        # Ignorar si no parece fila válida
         if len(fila) < 4:
             continue
 
-        # Normalizar a 11 columnas
         while len(fila) < 11:
             fila.append("")
 
@@ -127,63 +113,66 @@ def extraer_tabla_desde_texto(texto):
 
     df = pd.DataFrame(datos, columns=encabezados)
 
-    # Limpieza adicional
-    df = df.applymap(lambda x: x.replace("\r", " ").replace("\n", " ").strip() if isinstance(x, str) else x)
+    df = df.applymap(
+        lambda x: x.replace("\r", " ").replace("\n", " ").strip()
+        if isinstance(x, str) else x
+    )
 
     return df
-
 
 # ========================= PROCESAR ACLARABOT =========================
 
 def procesar_aclarabot():
     print("\n=== Procesando ACLARABOT ===")
 
-    # =====================================================
-    # ELIMINAR TODOS LOS CSV DEL DIRECTORIO DESTINO
-    # =====================================================
+    # 🔥 Limpiar CSVs previos
     try:
         if not os.path.exists(RUTA_DESTINO):
             os.makedirs(RUTA_DESTINO)
         else:
             for archivo in os.listdir(RUTA_DESTINO):
                 ruta_archivo = os.path.join(RUTA_DESTINO, archivo)
-                # Asegurarnos de no borrar carpetas (especialmente Copy-Aclarapp)
                 if os.path.isfile(ruta_archivo) and archivo.lower().endswith(".csv"):
-                    try:
-                        os.remove(ruta_archivo)
-                        print(f"  - Eliminado: {archivo}")
-                    except Exception as e:
-                        print(f"  ✗ Error al eliminar {archivo}: {e}")
+                    os.remove(ruta_archivo)
+                    print(f"  - Eliminado: {archivo}")
     except Exception as e:
-        print(f"✗ Error accediendo a {RUTA_DESTINO}: {e}")
-        # Si falla el borrado/creación, continuamos para intentar generar el archivo nuevo
+        print(f"✗ Error limpiando carpeta destino: {e}")
 
-    # =====================================================
-    # CONTINÚA EL PROCESAMIENTO NORMAL
-    # =====================================================
     hoy = datetime.now()
     archivo_salida = os.path.join(RUTA_DESTINO, hoy.strftime("%d-%b") + ".csv")
 
     frames = []
 
     for ent in ENTORNOS:
-        ruta = os.path.join(
-            RUTA_BASE_ACLARABOT,
-            ent, "Log",
-            str(hoy.year),
-            hoy.strftime("%m"),
-            "Log.csv"
-        )
+        ruta_encontrada = None
 
-        if not os.path.exists(ruta):
-            print(f"  ✗ No encontrado: {ruta}")
+        for ruta_base in RUTAS_BASE_ACLARABOT:
+            ruta_intento = os.path.join(
+                ruta_base,
+                ent, "Log",
+                str(hoy.year),
+                hoy.strftime("%m"),
+                "Log.csv"
+            )
+
+            if os.path.exists(ruta_intento):
+                ruta_encontrada = ruta_intento
+                break
+
+        if not ruta_encontrada:
+            print(f"  ✗ {ent}: Log.csv no encontrado en ninguna ruta base")
             continue
 
         try:
-            df = pd.read_csv(ruta, usecols=range(12), encoding="utf-8", on_bad_lines="skip")
+            df = pd.read_csv(
+                ruta_encontrada,
+                usecols=range(12),
+                encoding="utf-8",
+                on_bad_lines="skip"
+            )
             df.insert(0, "ENTORNO", ent)
             frames.append(df)
-            print(f"  ✓ {ent}: {len(df)} filas")
+            print(f"  ✓ {ent}: {len(df)} filas → {ruta_encontrada}")
 
         except Exception as e:
             print(f"  ✗ Error leyendo {ent}: {e}")
@@ -194,10 +183,9 @@ def procesar_aclarabot():
             df_final.to_csv(archivo_salida, index=False, encoding="utf-8-sig")
             print(f"\n✓ Guardado: {archivo_salida}")
         except Exception as e:
-            print(f"\n✗ Error al guardar {archivo_salida}: {e}")
+            print(f"\n✗ Error al guardar archivo final: {e}")
     else:
         print("\n✗ No se procesó ningún entorno.")
-
 
 # ========================= PROCESAR ACLARAPP =========================
 
@@ -224,13 +212,12 @@ def procesar_aclarapp():
 
     return df
 
-
 # ========================= MAIN =========================
 
 def main():
-    print("="*65)
+    print("=" * 65)
     print(" SISTEMA AUTOMÁTICO DE REPORTES ACLARABOT + ACLARAPP ")
-    print("="*65)
+    print("=" * 65)
 
     procesar_aclarabot()
     df_app = procesar_aclarapp()
@@ -239,7 +226,6 @@ def main():
     if df_app is not None:
         print(f"✓ Aclarapp procesado: {len(df_app)} filas")
     print("✓ Proceso completado.")
-
 
 if __name__ == "__main__":
     main()
