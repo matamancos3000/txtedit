@@ -1,0 +1,11 @@
+const originalFetch = window.fetch;
+window.fetch = function(...args) {
+    console.log('Fetch llamado:', args);
+    return originalFetch.apply(this, args)
+        .then(response => {
+            response.clone().json().then(data => {
+                console.log('Respuesta JSON:', data);
+            });
+            return response;
+        });
+};
