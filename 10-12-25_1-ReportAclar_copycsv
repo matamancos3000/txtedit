@@ -179,10 +179,9 @@ def procesar_aclarabot():
                         on_bad_lines="skip"
                     )
 
-                    df.insert(0, "RUTA_BASE", ruta_base)
-                    df.insert(1, "ENTORNO", ent)
-                    df.insert(2, "AÑO", año)
-                    df.insert(3, "MES", mes)
+                   
+                    df.insert(0, "ENTORNO", ent)
+                    
 
                     frames.append(df)
                     print(f"  ✓ {ent} {año}-{mes}: {len(df)} filas")
