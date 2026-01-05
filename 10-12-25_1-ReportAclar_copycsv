@@ -7,7 +7,7 @@ from datetime import datetime
 
 RUTAS_BASE_ACLARABOT = [
     r"\\hlah.adroot.hsbc\MX\RBWM\9870\CMU_preview\Proceso CMU\RPA Reporte y Cambio\Aclarabot",
-    r"\\OTRA_RUTA\ALTERNATIVA\Aclarabot"  # ← pon aquí la segunda real
+    r"\\OTRA_RUTA\ALTERNATIVA\Aclarabot"
 ]
 
 RUTA_DESTINO = "c:/Copia-reporte-Aclarabot"
@@ -15,9 +15,32 @@ RUTA_ACLARAPP = "c:/Copia-reporte-Aclarabot/Copy-Aclarapp/TablaCopiadaDeAclarapp
 
 ENTORNOS = ["DEV", "UAT", "PROD"]
 
+MESES_A_BUSCAR = 3   # 👈 AQUÍ defines cuántos meses hacia atrás
+
 ESPACIOS_RAROS = r"[\u00A0\u2000-\u200B\u3000]"
 
 # ============================== UTILIDADES ==============================
+
+def obtener_ultimos_meses(n):
+    """
+    Devuelve una lista de tuplas (año, mes) desde el mes actual hacia atrás.
+    Ejemplo n=3 → [(2026, '01'), (2025, '12'), (2025, '11')]
+    """
+    meses = []
+    hoy = datetime.now()
+
+    for i in range(n):
+        año = hoy.year
+        mes = hoy.month - i
+
+        while mes <= 0:
+            mes += 12
+            año -= 1
+
+        meses.append((año, f"{mes:02d}"))
+
+    return meses
+
 
 def detectar_separador(linea):
     if linea.count("|") >= 5:
@@ -111,66 +134,68 @@ def procesar_aclarabot():
     print("\n=== Procesando ACLARABOT ===")
 
     # Limpiar CSVs previos
-    try:
-        if not os.path.exists(RUTA_DESTINO):
-            os.makedirs(RUTA_DESTINO)
-        else:
-            for archivo in os.listdir(RUTA_DESTINO):
-                ruta_archivo = os.path.join(RUTA_DESTINO, archivo)
-                if os.path.isfile(ruta_archivo) and archivo.lower().endswith(".csv"):
-                    os.remove(ruta_archivo)
-                    print(f"  - Eliminado: {archivo}")
-    except Exception as e:
-        print(f"✗ Error limpiando carpeta destino: {e}")
+    if not os.path.exists(RUTA_DESTINO):
+        os.makedirs(RUTA_DESTINO)
+    else:
+        for archivo in os.listdir(RUTA_DESTINO):
+            ruta_archivo = os.path.join(RUTA_DESTINO, archivo)
+            if os.path.isfile(ruta_archivo) and archivo.lower().endswith(".csv"):
+                os.remove(ruta_archivo)
+                print(f"  - Eliminado: {archivo}")
 
-    hoy = datetime.now()
-    archivo_salida = os.path.join(RUTA_DESTINO, hoy.strftime("%d-%b") + ".csv")
+    archivo_salida = os.path.join(
+        RUTA_DESTINO,
+        f"{datetime.now().strftime('%d-%b')}.csv"
+    )
 
     frames = []
+    meses = obtener_ultimos_meses(MESES_A_BUSCAR)
 
     for ruta_base in RUTAS_BASE_ACLARABOT:
         if not os.path.exists(ruta_base):
             print(f"✗ Ruta base no disponible: {ruta_base}")
             continue
 
-        print(f"\n→ Usando ruta base: {ruta_base}")
+        print(f"\n→ Ruta base: {ruta_base}")
 
         for ent in ENTORNOS:
-            ruta_log = os.path.join(
-                ruta_base,
-                ent, "Log",
-                str(hoy.year),
-                hoy.strftime("%m"),
-                "Log.csv"
-            )
-
-            if not os.path.exists(ruta_log):
-                print(f"  ✗ {ent}: Log.csv no encontrado")
-                continue
-
-            try:
-                df = pd.read_csv(
-                    ruta_log,
-                    usecols=range(12),
-                    encoding="utf-8",
-                    on_bad_lines="skip"
+            for año, mes in meses:
+                ruta_log = os.path.join(
+                    ruta_base,
+                    ent, "Log",
+                    str(año),
+                    mes,
+                    "Log.csv"
                 )
 
-                df.insert(0, "RUTA_BASE", ruta_base)
-                df.insert(1, "ENTORNO", ent)
+                if not os.path.exists(ruta_log):
+                    continue
 
-                frames.append(df)
-                print(f"  ✓ {ent}: {len(df)} filas")
+                try:
+                    df = pd.read_csv(
+                        ruta_log,
+                        usecols=range(12),
+                        encoding="utf-8",
+                        on_bad_lines="skip"
+                    )
 
-            except Exception as e:
-                print(f"  ✗ Error leyendo {ent}: {e}")
+                    df.insert(0, "RUTA_BASE", ruta_base)
+                    df.insert(1, "ENTORNO", ent)
+                    df.insert(2, "AÑO", año)
+                    df.insert(3, "MES", mes)
+
+                    frames.append(df)
+                    print(f"  ✓ {ent} {año}-{mes}: {len(df)} filas")
+
+                except Exception as e:
+                    print(f"  ✗ Error leyendo {ruta_log}: {e}")
 
     if frames:
         df_final = pd.concat(frames, ignore_index=True)
         df_final.to_csv(archivo_salida, index=False, encoding="utf-8-sig")
         print(f"\n✓ Guardado: {archivo_salida}")
     else:
-        print("\n✗ No se encontró información en ninguna ruta.")
+        print("\n✗ No se encontró información en los meses solicitados.")
 
 # ========================= PROCESAR ACLARAPP =========================
 
@@ -205,12 +230,9 @@ def main():
     print("=" * 65)
 
     procesar_aclarabot()
-    df_app = procesar_aclarapp()
+    procesar_aclarapp()
 
-    print("\n=== RESUMEN ===")
-    if df_app is not None:
-        print(f"✓ Aclarapp procesado: {len(df_app)} filas")
-    print("✓ Proceso completado.")
+    print("\n✓ Proceso completado.")
 
 if __name__ == "__main__":
     main()
