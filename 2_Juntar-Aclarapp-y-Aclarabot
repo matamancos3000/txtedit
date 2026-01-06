@@ -1,10 +1,10 @@
 import pandas as pd
-import logging
 from pathlib import Path
+import logging
 from datetime import datetime
 
 # =========================
-# CONFIGURACIÓN DE LOGGING
+# LOGGING
 # =========================
 logging.basicConfig(
     level=logging.INFO,
@@ -13,119 +13,120 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # =========================
-# CONFIGURACIÓN GENERAL
+# CONFIGURACIÓN
 # =========================
 BASE_PATH = Path("c:/Copia-reporte-Aclarabot")
 
+# Archivos de entrada
+ACLARABOT_CSVS = list(BASE_PATH.glob("*.csv"))
 ACLARAPP_PATH = BASE_PATH / "Copy-Aclarapp" / "TablaCopiadaDeAclarapp_LIMPIADO.csv"
+INFO_AGENTES_PATH = BASE_PATH / "Copy-Aclarapp" / "InfoAgentes.csv"
 
+# Archivo de salida
 OUTPUT_FILE = BASE_PATH / f"Acumulado_filtrado_{datetime.now().strftime('%d-%b')}.csv"
 
-# Columnas Aclarapp que NO se deben repetir
-COLUMNAS_ACLARAPP_EXCLUIR = {
-    "ID Aclaración",
-    "Registro",
-    "Folio",
-    "CIS",
-    "Acciones"
-}
-
 # =========================
-# FUNCIONES AUXILIARES
+# UTILIDADES
 # =========================
-def cargar_csv(ruta: Path) -> pd.DataFrame:
+def cargar_csv(ruta, sep=","):
     df = pd.read_csv(
         ruta,
+        sep=sep,
         dtype=str,
         encoding="utf-8-sig",
         on_bad_lines="skip"
     )
     df.columns = df.columns.str.strip()
+    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
     return df
 
-
 # =========================
-# FUNCIÓN PRINCIPAL
+# MAIN
 # =========================
-def unir_aclarabot_y_aclarapp():
-    logger.info("🚀 Iniciando unión Aclarabot + Aclarapp")
+def main():
+    logger.info("🚀 Iniciando merge ACLARABOT + ACLARAPP + INFOAGENTES")
 
     # =========================
-    # 1. CARGAR ACLARAPP
+    # 1. LEER ACLARABOT
     # =========================
-    if not ACLARAPP_PATH.exists():
-        raise FileNotFoundError("❌ No existe TablaCopiadaDeAclarapp_LIMPIADO.csv")
+    if not ACLARABOT_CSVS:
+        raise FileNotFoundError("❌ No se encontraron CSVs de Aclarabot en la carpeta base")
 
-    df_aclarapp = cargar_csv(ACLARAPP_PATH)
-    logger.info(f"✓ Aclarapp cargado ({len(df_aclarapp)} filas)")
+    aclarabot_dfs = []
+    for csv in ACLARABOT_CSVS:
+        df = cargar_csv(csv)
+        aclarabot_dfs.append(df)
+        logger.info(f"✓ Aclarabot cargado: {csv.name} ({len(df)} filas)")
 
-    # =========================
-    # 2. CARGAR LOGS ACLARABOT
-    # =========================
-    archivos_logs = [
-        f for f in BASE_PATH.glob("*.csv")
-        if not f.name.startswith("Acumulado_filtrado")
-    ]
-
-    if not archivos_logs:
-        raise FileNotFoundError("❌ No se encontraron CSVs de Aclarabot")
-
-    logs = []
-    for archivo in archivos_logs:
-        df = cargar_csv(archivo)
-        logs.append(df)
-        logger.info(f"✓ Log cargado: {archivo.name} ({len(df)} filas)")
-
-    df_logs = pd.concat(logs, ignore_index=True)
+    aclarabot_df = pd.concat(aclarabot_dfs, ignore_index=True)
 
     # =========================
-    # 3. VALIDAR COLUMNAS CLAVE
+    # 2. LEER ACLARAPP
     # =========================
-    if "AclaracionID" not in df_logs.columns:
-        raise ValueError("❌ No existe columna AclaracionID en Aclarabot")
-
-    if "ID Aclaración" not in df_aclarapp.columns:
-        raise ValueError("❌ No existe columna ID Aclaración en Aclarapp")
+    aclarapp_df = cargar_csv(ACLARAPP_PATH, sep="|")
+    logger.info(f"✓ Aclarapp cargado ({len(aclarapp_df)} filas)")
 
     # =========================
-    # 4. PREPARAR ACLARAPP (QUITAR DUPLICADAS)
+    # 3. MERGE ACLARABOT + ACLARAPP
     # =========================
-    columnas_aclarapp_finales = [
-        c for c in df_aclarapp.columns
-        if c not in COLUMNAS_ACLARAPP_EXCLUIR
-    ]
-
-    df_aclarapp_reducido = df_aclarapp[
-        ["ID Aclaración"] + columnas_aclarapp_finales
-    ]
-
-    # =========================
-    # 5. MERGE
-    # =========================
-    df_final = df_logs.merge(
-        df_aclarapp_reducido,
+    merge_1 = aclarabot_df.merge(
+        aclarapp_df,
         how="left",
         left_on="AclaracionID",
-        right_on="ID Aclaración"
+        right_on="ID Aclaración",
+        suffixes=("", "_ACLARAPP"),
+        indicator=True
     )
 
-    df_final.drop(columns=["ID Aclaración"], inplace=True)
-
-    logger.info(f"🔗 Merge completado | Filas finales: {len(df_final)}")
-
-    # =========================
-    # 6. ORDENAR POR FECHA
-    # =========================
-    if "Fecha" in df_final.columns:
-        df_final["Fecha"] = pd.to_datetime(
-            df_final["Fecha"],
-            format="%d/%m/%Y %H:%M:%S",
-            errors="coerce"
-        )
-        df_final.sort_values("Fecha", inplace=True)
+    logger.info(f"Merge Aclarapp: {merge_1['_merge'].value_counts().to_dict()}")
+    merge_1.drop(columns=["_merge"], inplace=True)
 
     # =========================
-    # 7. EXPORTAR CSV
+    # 4. RENOMBRAR CIS DE ACLARAPP → CIS_2
+    # =========================
+    if "CIS_ACLARAPP" in merge_1.columns:
+        merge_1.rename(columns={"CIS_ACLARAPP": "CIS_2"}, inplace=True)
+    elif "CIS_y" in merge_1.columns:
+        merge_1.rename(columns={"CIS_y": "CIS_2"}, inplace=True)
+
+    # =========================
+    # 5. LEER INFOAGENTES
+    # =========================
+    agentes_df = cargar_csv(INFO_AGENTES_PATH, sep="|")
+    logger.info(f"✓ InfoAgentes cargado ({len(agentes_df)} filas)")
+
+    # =========================
+    # 6. MERGE FINAL CON INFOAGENTES
+    # =========================
+    df_final = merge_1.merge(
+        agentes_df,
+        how="left",
+        left_on="Numero de registro",
+        right_on="ID",
+        suffixes=("", "_AGENTE"),
+        indicator=True
+    )
+
+    logger.info(f"Merge Agentes: {df_final['_merge'].value_counts().to_dict()}")
+    df_final.drop(columns=["_merge"], inplace=True)
+
+    # =========================
+    # 7. ORDEN FINAL DE COLUMNAS
+    # =========================
+    columnas_finales = [
+        "Entorno", "Fecha", "Tipo de tarjeta", "Tipo de aclaracion",
+        "Detalles de aclaracion", "Numero de registro", "Folio SCC",
+        "CIS", "Cargos", "RobotID", "AclaracionID", "Estatus", "Detalles",
+        "ID Aclaración", "Registro", "Folio", "CIS_2",
+        "Fecha Creación", "Fecha Enviado", "Fecha Asignacion",
+        "Fecha Atendido", "Estado Actual", "Intentos", "Acciones",
+        "ID", "NOMBRE", "Supervisor", "Site", "Skill"
+    ]
+
+    df_final = df_final.reindex(columns=columnas_finales)
+
+    # =========================
+    # 8. EXPORTAR CSV
     # =========================
     df_final.to_csv(
         OUTPUT_FILE,
@@ -133,16 +134,12 @@ def unir_aclarabot_y_aclarapp():
         encoding="utf-8-sig"
     )
 
-    logger.info("✅ Archivo generado correctamente")
-    logger.info(f"📄 {OUTPUT_FILE.name}")
-
+    logger.info("✅ Merge completado correctamente")
+    logger.info(f"📄 Archivo generado: {OUTPUT_FILE}")
+    logger.info(f"📊 Total registros: {len(df_final)}")
 
 # =========================
 # EJECUCIÓN
 # =========================
 if __name__ == "__main__":
-    try:
-        unir_aclarabot_y_aclarapp()
-    except Exception as e:
-        logger.error(f"❌ Error fatal: {e}")
-        raise
+    main()
