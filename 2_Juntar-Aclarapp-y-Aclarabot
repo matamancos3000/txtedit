@@ -1,7 +1,8 @@
+import os
 import pandas as pd
 import logging
+from datetime import datetime
 from pathlib import Path
-import unicodedata
 
 # =========================
 # LOGGING
@@ -13,36 +14,43 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # =========================
-# CONFIGURACIÓN
+# CONFIG
 # =========================
 BASE_PATH = Path("c:/Copia-reporte-Aclarabot")
 
-ACLARABOT_PATH = next(BASE_PATH.glob("*.csv"))  # ej: 06-Jan.csv
-ACLARAPP_PATH = BASE_PATH / "Copy-Aclarapp" / "TablaCopiadaDeAclarapp.csv"
-AGENTES_PATH = BASE_PATH / "Copy-Aclarapp" / "InfoAgentes.csv"
+ACLARABOT_CSV = next(BASE_PATH.glob("*.csv"))  # Ej: 06-Jan.csv
+ACLARAPP_CSV = BASE_PATH / "Copy-Aclarapp" / "TablaCopiadaDeAclarapp_LIMPIADO.csv"
+AGENTES_CSV = BASE_PATH / "Copy-Aclarapp" / "InfoAgentes.csv"
 
-OUTPUT_FILE = BASE_PATH / "Acumulado_filtrado_11-Dec.csv"
+OUTPUT_FILE = BASE_PATH / "Acumulado_filtrado.csv"
 
 # =========================
-# FUNCIONES
+# UTILIDADES
 # =========================
-def normalizar_columna(col):
-    col = col.strip()
-    col = unicodedata.normalize("NFKD", col)
-    col = col.encode("ascii", "ignore").decode("utf-8")
-    return col
-
 def cargar_csv(ruta, sep=","):
     df = pd.read_csv(
         ruta,
         sep=sep,
         dtype=str,
         encoding="utf-8-sig",
-        on_bad_lines="warn"
+        on_bad_lines="skip"
     )
-    df.columns = [normalizar_columna(c) for c in df.columns]
-    df = df.apply(lambda col: col.str.strip() if col.dtype == "object" else col)
+    df.columns = df.columns.str.strip()
+    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
     return df
+
+
+def convertir_fecha_12h(serie):
+    return pd.to_datetime(
+        serie
+        .str.replace("p.m.", "PM", regex=False)
+        .str.replace("a.m.", "AM", regex=False)
+        .str.replace("P.M.", "PM", regex=False)
+        .str.replace("A.M.", "AM", regex=False),
+        format="%d/%m/%Y %I:%M:%S %p",
+        errors="coerce"
+    )
+
 
 # =========================
 # MAIN
@@ -51,66 +59,85 @@ def main():
     logger.info("🚀 Iniciando merge ACLARABOT + ACLARAPP + INFOAGENTES")
 
     # =========================
-    # CARGA ARCHIVOS
+    # 1. CARGA DE ARCHIVOS
     # =========================
-    aclarabot_df = cargar_csv(ACLARABOT_PATH)
-    logger.info(f"✓ Aclarabot cargado: {ACLARABOT_PATH.name} ({len(aclarabot_df)} filas)")
+    aclarabot_df = cargar_csv(ACLARABOT_CSV)
+    logger.info(f"✓ Aclarabot cargado: {ACLARABOT_CSV.name} ({len(aclarabot_df)} filas)")
 
-    aclarapp_df = cargar_csv(ACLARAPP_PATH, sep="|")
+    aclarapp_df = cargar_csv(ACLARAPP_CSV, sep="|")
     logger.info(f"✓ Aclarapp cargado ({len(aclarapp_df)} filas)")
 
-    agentes_df = cargar_csv(AGENTES_PATH, sep="|")
+    agentes_df = cargar_csv(AGENTES_CSV, sep="|")
     logger.info(f"✓ InfoAgentes cargado ({len(agentes_df)} filas)")
 
     # =========================
-    # AJUSTES DE COLUMNAS
+    # 2. AJUSTES PREVIOS
     # =========================
+    # Renombrar CIS de Aclarapp
     if "CIS" in aclarapp_df.columns:
         aclarapp_df.rename(columns={"CIS": "CIS_2"}, inplace=True)
 
     # =========================
-    # MERGE 1: ACLARABOT + ACLARAPP
+    # 3. MERGE ACLARABOT + ACLARAPP
     # =========================
     merge_1 = aclarabot_df.merge(
         aclarapp_df,
         how="left",
         left_on="AclaracionID",
-        right_on="ID Aclaracion",
-        suffixes=("", "_DUP"),
-        indicator=True
+        right_on="ID Aclaración",
+        suffixes=("", "_DUP")
     )
 
-    logger.info(f"Merge Aclarapp: {merge_1['_merge'].value_counts().to_dict()}")
-    merge_1.drop(columns=["_merge"], inplace=True)
-
     # =========================
-    # MERGE 2: + INFOAGENTES
+    # 4. MERGE CON INFOAGENTES
     # =========================
     df_final = merge_1.merge(
         agentes_df,
         how="left",
         left_on="Numero de registro",
         right_on="ID",
-        suffixes=("", "_AGENTE"),
-        indicator=True
+        suffixes=("", "_AGENTE_DUP")
     )
 
-    logger.info(f"Merge Agentes: {df_final['_merge'].value_counts().to_dict()}")
-    df_final.drop(columns=["_merge"], inplace=True)
+    # =========================
+    # 5. CONVERSIÓN DE FECHAS
+    # =========================
+    columnas_fecha = [
+        "Fecha",
+        "Fecha Creación",
+        "Fecha Enviado",
+        "Fecha Asignacion",
+        "Fecha Atendido"
+    ]
+
+    for col in columnas_fecha:
+        if col in df_final.columns:
+            df_final[col] = convertir_fecha_12h(df_final[col])
 
     # =========================
-    # ORDENAR POR FECHA
+    # 6. ORDENAR POR FECHA
     # =========================
-    df_final["Fecha"] = pd.to_datetime(
-        df_final["Fecha"],
-        format="%d/%m/%Y %H:%M:%S",
-        errors="coerce"
-    )
-
-    df_final.sort_values("Fecha", inplace=True)
+    if "Fecha" in df_final.columns:
+        df_final.sort_values("Fecha", inplace=True)
 
     # =========================
-    # EXPORTAR CSV
+    # 7. ORDEN FINAL DE COLUMNAS
+    # =========================
+    columnas_finales = [
+        "Entorno","Fecha","Tipo de tarjeta","Tipo de aclaracion",
+        "Detalles de aclaracion","Numero de registro","Folio SCC",
+        "CIS","Cargos","RobotID","AclaracionID","Estatus","Detalles",
+        "ID Aclaración","Registro","Folio","CIS_2",
+        "Fecha Creación","Fecha Enviado","Fecha Asignacion",
+        "Fecha Atendido","Estado Actual","Intentos","Acciones",
+        "ID","NOMBRE","Supervisor","Site","Skill"
+    ]
+
+    columnas_existentes = [c for c in columnas_finales if c in df_final.columns]
+    df_final = df_final[columnas_existentes]
+
+    # =========================
+    # 8. EXPORTAR CSV
     # =========================
     df_final.to_csv(
         OUTPUT_FILE,
@@ -118,9 +145,10 @@ def main():
         encoding="utf-8-sig"
     )
 
-    logger.info("✅ Archivo generado correctamente")
-    logger.info(f"📄 {OUTPUT_FILE}")
-    logger.info(f"📊 Total filas: {len(df_final)}")
+    logger.info("✅ Merge completado correctamente")
+    logger.info(f"📄 Archivo generado: {OUTPUT_FILE}")
+    logger.info(f"📊 Total registros: {len(df_final)}")
+
 
 # =========================
 # EJECUCIÓN
