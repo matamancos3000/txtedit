@@ -1,7 +1,6 @@
-import os
 import pandas as pd
 import logging
-from datetime import datetime
+import unicodedata
 from pathlib import Path
 
 # =========================
@@ -18,7 +17,7 @@ logger = logging.getLogger(__name__)
 # =========================
 BASE_PATH = Path("c:/Copia-reporte-Aclarabot")
 
-ACLARABOT_CSV = next(BASE_PATH.glob("*.csv"))  # Ej: 06-Jan.csv
+ACLARABOT_CSV = next(BASE_PATH.glob("*.csv"))
 ACLARAPP_CSV = BASE_PATH / "Copy-Aclarapp" / "TablaCopiadaDeAclarapp_LIMPIADO.csv"
 AGENTES_CSV = BASE_PATH / "Copy-Aclarapp" / "InfoAgentes.csv"
 
@@ -27,6 +26,14 @@ OUTPUT_FILE = BASE_PATH / "Acumulado_filtrado.csv"
 # =========================
 # UTILIDADES
 # =========================
+def normalizar_texto(texto):
+    texto = texto.strip()
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = texto.replace(" ", "_")
+    return texto.upper()
+
+
 def cargar_csv(ruta, sep=","):
     df = pd.read_csv(
         ruta,
@@ -35,7 +42,7 @@ def cargar_csv(ruta, sep=","):
         encoding="utf-8-sig",
         on_bad_lines="skip"
     )
-    df.columns = df.columns.str.strip()
+    df.columns = [normalizar_texto(c) for c in df.columns]
     df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
     return df
 
@@ -51,107 +58,97 @@ def convertir_fecha_12h(serie):
         errors="coerce"
     )
 
-
 # =========================
 # MAIN
 # =========================
 def main():
     logger.info("🚀 Iniciando merge ACLARABOT + ACLARAPP + INFOAGENTES")
 
-    # =========================
-    # 1. CARGA DE ARCHIVOS
-    # =========================
     aclarabot_df = cargar_csv(ACLARABOT_CSV)
-    logger.info(f"✓ Aclarabot cargado: {ACLARABOT_CSV.name} ({len(aclarabot_df)} filas)")
-
     aclarapp_df = cargar_csv(ACLARAPP_CSV, sep="|")
-    logger.info(f"✓ Aclarapp cargado ({len(aclarapp_df)} filas)")
-
     agentes_df = cargar_csv(AGENTES_CSV, sep="|")
-    logger.info(f"✓ InfoAgentes cargado ({len(agentes_df)} filas)")
+
+    logger.info("✓ Archivos cargados correctamente")
 
     # =========================
-    # 2. AJUSTES PREVIOS
+    # RENOMBRES CONTROLADOS
     # =========================
-    # Renombrar CIS de Aclarapp
-    if "CIS" in aclarapp_df.columns:
-        aclarapp_df.rename(columns={"CIS": "CIS_2"}, inplace=True)
+    aclarabot_df.rename(columns={
+        "NUMERO_DE_REGISTRO": "NUMERO_REGISTRO"
+    }, inplace=True)
+
+    aclarapp_df.rename(columns={
+        "ID_ACLARACION": "ID_ACLARACION",
+        "REGISTRO": "REGISTRO",
+        "CIS": "CIS_2"
+    }, inplace=True)
+
+    agentes_df.rename(columns={
+        "ID": "ID"
+    }, inplace=True)
 
     # =========================
-    # 3. MERGE ACLARABOT + ACLARAPP
+    # MERGE 1: ACLARABOT + ACLARAPP
     # =========================
-    merge_1 = aclarabot_df.merge(
+    df_merge = aclarabot_df.merge(
         aclarapp_df,
         how="left",
-        left_on="AclaracionID",
-        right_on="ID Aclaración",
-        suffixes=("", "_DUP")
+        left_on="ACLARACIONID",
+        right_on="ID_ACLARACION"
     )
 
     # =========================
-    # 4. MERGE CON INFOAGENTES
+    # MERGE 2: + INFOAGENTES
     # =========================
-    df_final = merge_1.merge(
+    df_final = df_merge.merge(
         agentes_df,
         how="left",
-        left_on="Numero de registro",
-        right_on="ID",
-        suffixes=("", "_AGENTE_DUP")
+        left_on="NUMERO_REGISTRO",
+        right_on="ID"
     )
 
     # =========================
-    # 5. CONVERSIÓN DE FECHAS
+    # FECHAS
     # =========================
     columnas_fecha = [
-        "Fecha",
-        "Fecha Creación",
-        "Fecha Enviado",
-        "Fecha Asignacion",
-        "Fecha Atendido"
+        "FECHA",
+        "FECHA_CREACION",
+        "FECHA_ENVIADO",
+        "FECHA_ASIGNACION",
+        "FECHA_ATENDIDO"
     ]
 
     for col in columnas_fecha:
         if col in df_final.columns:
             df_final[col] = convertir_fecha_12h(df_final[col])
 
-    # =========================
-    # 6. ORDENAR POR FECHA
-    # =========================
-    if "Fecha" in df_final.columns:
-        df_final.sort_values("Fecha", inplace=True)
+    df_final.sort_values("FECHA", inplace=True)
 
     # =========================
-    # 7. ORDEN FINAL DE COLUMNAS
+    # ORDEN FINAL
     # =========================
     columnas_finales = [
-        "Entorno","Fecha","Tipo de tarjeta","Tipo de aclaracion",
-        "Detalles de aclaracion","Numero de registro","Folio SCC",
-        "CIS","Cargos","RobotID","AclaracionID","Estatus","Detalles",
-        "ID Aclaración","Registro","Folio","CIS_2",
-        "Fecha Creación","Fecha Enviado","Fecha Asignacion",
-        "Fecha Atendido","Estado Actual","Intentos","Acciones",
-        "ID","NOMBRE","Supervisor","Site","Skill"
+        "ENTORNO","FECHA","TIPO_DE_TARJETA","TIPO_DE_ACLARACION",
+        "DETALLES_DE_ACLARACION","NUMERO_REGISTRO","FOLIO_SCC",
+        "CIS","CARGOS","ROBOTID","ACLARACIONID","ESTATUS","DETALLES",
+        "ID_ACLARACION","REGISTRO","FOLIO","CIS_2",
+        "FECHA_CREACION","FECHA_ENVIADO","FECHA_ASIGNACION",
+        "FECHA_ATENDIDO","ESTADO_ACTUAL","INTENTOS","ACCIONES",
+        "ID","NOMBRE","SUPERVISOR","SITE","SKILL"
     ]
 
     columnas_existentes = [c for c in columnas_finales if c in df_final.columns]
     df_final = df_final[columnas_existentes]
 
     # =========================
-    # 8. EXPORTAR CSV
+    # EXPORTAR
     # =========================
-    df_final.to_csv(
-        OUTPUT_FILE,
-        index=False,
-        encoding="utf-8-sig"
-    )
+    df_final.to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
 
-    logger.info("✅ Merge completado correctamente")
+    logger.info("✅ Proceso finalizado correctamente")
     logger.info(f"📄 Archivo generado: {OUTPUT_FILE}")
-    logger.info(f"📊 Total registros: {len(df_final)}")
+    logger.info(f"📊 Total filas: {len(df_final)}")
 
 
-# =========================
-# EJECUCIÓN
-# =========================
 if __name__ == "__main__":
     main()
