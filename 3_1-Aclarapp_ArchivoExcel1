@@ -4,6 +4,10 @@ from pathlib import Path
 import re
 from datetime import datetime, timedelta
 import numpy as np
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment, NamedStyle
+from openpyxl.chart import BarChart, PieChart, Reference, Series
+from openpyxl.utils import get_column_letter
 
 # =========================
 # LOGGING
@@ -91,111 +95,74 @@ def calcular_tiempo_minutos(fecha_inicio, fecha_fin):
     except:
         return np.nan
 
-def crear_formato_excel(writer, df_resumen):
-    """Aplica formato al archivo Excel"""
-    workbook = writer.book
+def aplicar_formato_excel(wb, ws, df):
+    """Aplica formato a la hoja de Excel usando openpyxl"""
     
-    # Formato para encabezados
-    header_format = workbook.add_format({
-        'bold': True,
-        'text_wrap': True,
-        'valign': 'top',
-        'fg_color': '#4472C4',
-        'font_color': 'white',
-        'border': 1,
-        'align': 'center'
-    })
+    # Definir estilos
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    center_alignment = Alignment(horizontal="center", vertical="center")
     
-    # Formato para datos
-    data_format = workbook.add_format({
-        'border': 1,
-        'align': 'center'
-    })
-    
-    # Formato para números
-    number_format = workbook.add_format({
-        'border': 1,
-        'align': 'center',
-        'num_format': '#,##0'
-    })
-    
-    # Formato para decimales
-    decimal_format = workbook.add_format({
-        'border': 1,
-        'align': 'center',
-        'num_format': '#,##0.00'
-    })
-    
-    # Formato para fechas
-    date_format = workbook.add_format({
-        'border': 1,
-        'align': 'center',
-        'num_format': 'dd/mm/yyyy hh:mm:ss'
-    })
-    
-    # Formato para tiempo
-    time_format = workbook.add_format({
-        'border': 1,
-        'align': 'center',
-        'num_format': '[h]:mm:ss'
-    })
-    
-    # Aplicar formatos a cada hoja
-    for sheet_name in writer.sheets:
-        worksheet = writer.sheets[sheet_name]
+    # Aplicar formato a encabezados
+    for col_num, column_name in enumerate(df.columns, 1):
+        cell = ws.cell(row=1, column=col_num, value=column_name)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.border = border
+        cell.alignment = center_alignment
         
-        # Aplicar formato a encabezados
-        for col_num, value in enumerate(df_resumen.columns.values):
-            worksheet.write(0, col_num, value, header_format)
+        # Ajustar ancho de columna
+        max_length = max(df[column_name].astype(str).apply(len).max(), len(column_name))
+        ws.column_dimensions[get_column_letter(col_num)].width = min(max_length + 2, 30)
+    
+    # Aplicar formato a datos
+    for row in range(2, len(df) + 2):
+        for col_num, column_name in enumerate(df.columns, 1):
+            cell = ws.cell(row=row, column=col_num)
+            cell_value = df.iat[row-2, col_num-1]
             
-            # Ajustar ancho de columnas
-            max_length = max(df_resumen[value].astype(str).map(len).max(), len(value)) + 2
-            worksheet.set_column(col_num, col_num, min(max_length, 30))
-        
-        # Aplicar formatos a datos
-        for row in range(1, len(df_resumen) + 1):
-            for col_num, col_name in enumerate(df_resumen.columns):
-                cell_value = df_resumen.iat[row-1, col_num]
-                
-                # Determinar formato según tipo de dato
-                if pd.isna(cell_value):
-                    worksheet.write(row, col_num, '', data_format)
-                elif 'Fecha' in col_name or 'fecha' in col_name.lower():
-                    if pd.notna(cell_value) and isinstance(cell_value, (pd.Timestamp, datetime)):
-                        worksheet.write_datetime(row, col_num, cell_value, date_format)
-                    else:
-                        worksheet.write(row, col_num, cell_value, data_format)
-                elif 'Tiempo' in col_name and 'segundos' not in col_name.lower():
-                    if pd.notna(cell_value):
-                        # Convertir minutos a formato tiempo de Excel
-                        tiempo_excel = cell_value / 1440  # 1440 minutos en un día
-                        worksheet.write_number(row, col_num, tiempo_excel, time_format)
-                    else:
-                        worksheet.write(row, col_num, '', data_format)
-                elif 'segundos' in col_name.lower():
-                    if pd.notna(cell_value):
-                        worksheet.write_number(row, col_num, cell_value, number_format)
-                    else:
-                        worksheet.write(row, col_num, '', data_format)
-                elif any(x in str(col_name).lower() for x in ['cargos', 'intentos', 'folio', 'cis']):
-                    if pd.notna(cell_value):
-                        try:
-                            worksheet.write_number(row, col_num, float(cell_value), number_format)
-                        except:
-                            worksheet.write(row, col_num, cell_value, data_format)
-                    else:
-                        worksheet.write(row, col_num, '', data_format)
+            # Aplicar bordes y alineación
+            cell.border = border
+            cell.alignment = center_alignment
+            
+            # Asignar valor
+            if pd.isna(cell_value):
+                cell.value = None
+            elif 'Fecha' in column_name:
+                if isinstance(cell_value, (pd.Timestamp, datetime)):
+                    cell.value = cell_value
+                    cell.number_format = 'DD/MM/YYYY HH:MM:SS'
                 else:
-                    worksheet.write(row, col_num, cell_value, data_format)
+                    cell.value = cell_value
+            elif 'Tiempo' in column_name and 'segundos' not in column_name.lower():
+                if pd.notna(cell_value):
+                    cell.value = cell_value
+                    # Formato de tiempo en minutos
+                    cell.number_format = '0.00 "min"'
+            elif 'segundos' in column_name.lower():
+                if pd.notna(cell_value):
+                    cell.value = cell_value
+                    cell.number_format = '#,##0'
+            else:
+                cell.value = cell_value
 
-def crear_graficas(writer, df):
-    """Crea gráficas en hojas separadas"""
-    workbook = writer.book
+def crear_graficas_openpyxl(wb, df):
+    """Crea gráficas usando openpyxl"""
     
     # =========================
     # HOJA: Resumen General
     # =========================
-    worksheet_resumen = workbook.add_worksheet('Resumen General')
+    ws_resumen = wb.create_sheet(title="Resumen General")
+    
+    # Títulos
+    ws_resumen['A1'] = "ESTADÍSTICAS DEL REPORTE"
+    ws_resumen['A1'].font = Font(bold=True, size=14)
     
     # Estadísticas básicas
     stats = [
@@ -203,115 +170,137 @@ def crear_graficas(writer, df):
         ['Registros exitosos', df['Estatus'].eq('exitoso').sum()],
         ['Agentes involucrados', df['Nombre Agente'].nunique()],
         ['Tipos de aclaración', df['Tipo de aclaracion'].nunique()],
-        ['Tiempo promedio captura (min)', df['Tiempo de captura agente'].mean()],
-        ['Tiempo promedio alta robot (min)', df['Tiempo de alta robot'].mean()],
-        ['Cargos totales', df['Cargos'].astype(float).sum() if df['Cargos'].notna().any() else 0]
+        ['Tiempo promedio captura (min)', f"{df['Tiempo de captura agente'].mean():.2f}"],
+        ['Tiempo promedio alta robot (min)', f"{df['Tiempo de alta robot'].mean():.2f}"]
     ]
     
-    for i, (label, value) in enumerate(stats):
-        worksheet_resumen.write(i, 0, label)
-        if isinstance(value, float):
-            worksheet_resumen.write(i, 1, value, workbook.add_format({'num_format': '#,##0.00'}))
-        else:
-            worksheet_resumen.write(i, 1, value)
+    if 'Cargos' in df.columns and df['Cargos'].notna().any():
+        try:
+            cargos_totales = pd.to_numeric(df['Cargos'], errors='coerce').sum()
+            stats.append(['Cargos totales', f"{cargos_totales:,.2f}"])
+        except:
+            pass
+    
+    # Escribir estadísticas
+    for i, (label, value) in enumerate(stats, start=3):
+        ws_resumen[f'A{i}'] = label
+        ws_resumen[f'B{i}'] = value
+        ws_resumen[f'A{i}'].font = Font(bold=True)
     
     # =========================
-    # HOJA: Gráfica 1 - Aclaraciones por Agente
+    # HOJA: Gráficas
     # =========================
-    worksheet_graf1 = workbook.add_worksheet('Gráficas')
+    ws_graficas = wb.create_sheet(title="Gráficas")
     
-    # Datos para gráfica de aclaraciones por agente
+    # Gráfica 1 - Aclaraciones por Agente (Top 10)
+    ws_graficas['A1'] = "TOP 10 AGENTES POR ACLARACIONES"
+    ws_graficas['A1'].font = Font(bold=True, size=12)
+    
     aclaraciones_por_agente = df['Nombre Agente'].value_counts().head(10)
     
-    worksheet_graf1.write(0, 0, 'Agente')
-    worksheet_graf1.write(0, 1, 'Cantidad de Aclaraciones')
+    ws_graficas['A3'] = 'Agente'
+    ws_graficas['B3'] = 'Cantidad de Aclaraciones'
+    ws_graficas['A3'].font = Font(bold=True)
+    ws_graficas['B3'].font = Font(bold=True)
     
-    for i, (agente, cantidad) in enumerate(aclaraciones_por_agente.items(), start=1):
-        worksheet_graf1.write(i, 0, agente)
-        worksheet_graf1.write(i, 1, cantidad)
+    for i, (agente, cantidad) in enumerate(aclaraciones_por_agente.items(), start=4):
+        ws_graficas[f'A{i}'] = agente
+        ws_graficas[f'B{i}'] = cantidad
     
-    # Crear gráfica
-    chart1 = workbook.add_chart({'type': 'column'})
-    chart1.add_series({
-        'name': 'Aclaraciones por Agente',
-        'categories': ['Gráficas', 1, 0, len(aclaraciones_por_agente), 0],
-        'values': ['Gráficas', 1, 1, len(aclaraciones_por_agente), 1],
-        'data_labels': {'value': True},
-        'fill': {'color': '#4472C4'}
-    })
+    # Crear gráfica de barras
+    chart1 = BarChart()
+    chart1.type = "col"
+    chart1.style = 10
+    chart1.title = "Top 10 Agentes por Aclaraciones"
+    chart1.y_axis.title = "Cantidad de Aclaraciones"
+    chart1.x_axis.title = "Agente"
     
-    chart1.set_title({'name': 'Top 10 Agentes por Aclaraciones'})
-    chart1.set_x_axis({'name': 'Agente'})
-    chart1.set_y_axis({'name': 'Cantidad de Aclaraciones'})
-    chart1.set_style(11)
+    data = Reference(ws_graficas, min_col=2, min_row=3, max_row=3+len(aclaraciones_por_agente))
+    cats = Reference(ws_graficas, min_col=1, min_row=4, max_row=3+len(aclaraciones_por_agente))
     
-    worksheet_graf1.insert_chart('D2', chart1, {'x_offset': 25, 'y_offset': 10})
+    chart1.add_data(data, titles_from_data=True)
+    chart1.set_categories(cats)
+    chart1.shape = 4
     
-    # =========================
+    ws_graficas.add_chart(chart1, "D3")
+    
     # Gráfica 2 - Tipos de Aclaración
-    # =========================
+    start_row = len(aclaraciones_por_agente) + 8
+    ws_graficas[f'A{start_row}'] = "DISTRIBUCIÓN POR TIPO DE ACLARACIÓN"
+    ws_graficas[f'A{start_row}'].font = Font(bold=True, size=12)
+    
     tipos_aclaracion = df['Tipo de aclaracion'].value_counts()
     
-    start_row = len(aclaraciones_por_agente) + 5
-    worksheet_graf1.write(start_row, 0, 'Tipo de Aclaración')
-    worksheet_graf1.write(start_row, 1, 'Cantidad')
+    ws_graficas[f'A{start_row+2}'] = 'Tipo de Aclaración'
+    ws_graficas[f'B{start_row+2}'] = 'Cantidad'
+    ws_graficas[f'A{start_row+2}'].font = Font(bold=True)
+    ws_graficas[f'B{start_row+2}'].font = Font(bold=True)
     
     for i, (tipo, cantidad) in enumerate(tipos_aclaracion.items(), start=1):
-        worksheet_graf1.write(start_row + i, 0, tipo)
-        worksheet_graf1.write(start_row + i, 1, cantidad)
+        ws_graficas[f'A{start_row+2+i}'] = tipo
+        ws_graficas[f'B{start_row+2+i}'] = cantidad
     
-    chart2 = workbook.add_chart({'type': 'pie'})
-    chart2.add_series({
-        'name': 'Tipos de Aclaración',
-        'categories': ['Gráficas', start_row + 1, 0, start_row + len(tipos_aclaracion), 0],
-        'values': ['Gráficas', start_row + 1, 1, start_row + len(tipos_aclaracion), 1],
-        'data_labels': {'percentage': True, 'leader_lines': True}
-    })
+    # Crear gráfica de pastel
+    chart2 = PieChart()
+    chart2.title = "Distribución por Tipo de Aclaración"
     
-    chart2.set_title({'name': 'Distribución por Tipo de Aclaración'})
-    chart2.set_style(10)
+    data2 = Reference(ws_graficas, min_col=2, min_row=start_row+2, 
+                     max_row=start_row+2+len(tipos_aclaracion))
+    labels = Reference(ws_graficas, min_col=1, min_row=start_row+3, 
+                      max_row=start_row+2+len(tipos_aclaracion))
     
-    worksheet_graf1.insert_chart('D20', chart2, {'x_offset': 25, 'y_offset': 10})
+    chart2.add_data(data2, titles_from_data=True)
+    chart2.set_categories(labels)
     
-    # =========================
+    ws_graficas.add_chart(chart2, f"D{start_row+2}")
+    
     # Gráfica 3 - Tiempos Promedio por Agente
-    # =========================
+    start_row3 = start_row + len(tipos_aclaracion) + 8
+    ws_graficas[f'A{start_row3}'] = "TIEMPOS PROMEDIO POR AGENTE (TOP 10)"
+    ws_graficas[f'A{start_row3}'].font = Font(bold=True, size=12)
+    
     tiempos_por_agente = df.groupby('Nombre Agente').agg({
         'Tiempo de captura agente': 'mean',
         'Tiempo de alta robot': 'mean'
     }).head(10)
     
-    start_row += len(tipos_aclaracion) + 5
-    worksheet_graf1.write(start_row, 0, 'Agente')
-    worksheet_graf1.write(start_row, 1, 'Tiempo Captura Prom (min)')
-    worksheet_graf1.write(start_row, 2, 'Tiempo Alta Robot Prom (min)')
+    ws_graficas[f'A{start_row3+2}'] = 'Agente'
+    ws_graficas[f'B{start_row3+2}'] = 'Tiempo Captura Prom (min)'
+    ws_graficas[f'C{start_row3+2}'] = 'Tiempo Alta Robot Prom (min)'
+    
+    ws_graficas[f'A{start_row3+2}'].font = Font(bold=True)
+    ws_graficas[f'B{start_row3+2}'].font = Font(bold=True)
+    ws_graficas[f'C{start_row3+2}'].font = Font(bold=True)
     
     for i, (agente, row) in enumerate(tiempos_por_agente.iterrows(), start=1):
-        worksheet_graf1.write(start_row + i, 0, agente)
-        worksheet_graf1.write(start_row + i, 1, row['Tiempo de captura agente'])
-        worksheet_graf1.write(start_row + i, 2, row['Tiempo de alta robot'])
+        ws_graficas[f'A{start_row3+2+i}'] = agente
+        ws_graficas[f'B{start_row3+2+i}'] = row['Tiempo de captura agente']
+        ws_graficas[f'C{start_row3+2+i}'] = row['Tiempo de alta robot']
     
-    chart3 = workbook.add_chart({'type': 'column'})
-    chart3.add_series({
-        'name': 'Tiempo Captura',
-        'categories': ['Gráficas', start_row + 1, 0, start_row + len(tiempos_por_agente), 0],
-        'values': ['Gráficas', start_row + 1, 1, start_row + len(tiempos_por_agente), 1],
-        'fill': {'color': '#4472C4'}
-    })
+    # Crear gráfica de barras agrupadas
+    chart3 = BarChart()
+    chart3.type = "col"
+    chart3.style = 10
+    chart3.title = "Tiempos Promedio por Agente"
+    chart3.y_axis.title = "Minutos"
+    chart3.x_axis.title = "Agente"
+    chart3.grouping = "clustered"
     
-    chart3.add_series({
-        'name': 'Tiempo Alta Robot',
-        'categories': ['Gráficas', start_row + 1, 0, start_row + len(tiempos_por_agente), 0],
-        'values': ['Gráficas', start_row + 1, 2, start_row + len(tiempos_por_agente), 2],
-        'fill': {'color': '#ED7D31'}
-    })
+    data_captura = Reference(ws_graficas, min_col=2, min_row=start_row3+2, 
+                           max_row=start_row3+2+len(tiempos_por_agente))
+    data_alta = Reference(ws_graficas, min_col=3, min_row=start_row3+2, 
+                         max_row=start_row3+2+len(tiempos_por_agente))
+    cats3 = Reference(ws_graficas, min_col=1, min_row=start_row3+3, 
+                     max_row=start_row3+2+len(tiempos_por_agente))
     
-    chart3.set_title({'name': 'Tiempos Promedio por Agente (Top 10)'})
-    chart3.set_x_axis({'name': 'Agente'})
-    chart3.set_y_axis({'name': 'Minutos'})
-    chart3.set_style(12)
+    series1 = Series(data_captura, title="Tiempo Captura")
+    series2 = Series(data_alta, title="Tiempo Alta Robot")
     
-    worksheet_graf1.insert_chart('D35', chart3, {'x_offset': 25, 'y_offset': 10})
+    chart3.series.append(series1)
+    chart3.series.append(series2)
+    chart3.set_categories(cats3)
+    
+    ws_graficas.add_chart(chart3, f"E{start_row3+2}")
 
 # =========================
 # MAIN
@@ -328,7 +317,6 @@ def main():
     df = pd.read_csv(ARCHIVO_CSV, dtype=str, encoding='utf-8-sig')
     
     logger.info(f"  Filas originales: {len(df)}")
-    logger.info(f"  Columnas originales: {list(df.columns)}")
     
     # =========================
     # 2. FILTRAR POR STATUS
@@ -456,24 +444,36 @@ def main():
                 logger.warning(f"  No se pudo eliminar {archivo_excel.name}: {e}")
     
     # =========================
-    # 9. CREAR ARCHIVO EXCEL
+    # 9. CREAR ARCHIVO EXCEL CON OPENPYXL
     # =========================
     logger.info(f"💾 Creando archivo Excel: {RUTA_EXCEL}")
     
-    with pd.ExcelWriter(RUTA_EXCEL, engine='xlsxwriter') as writer:
-        # Hoja principal con datos
-        df.to_excel(writer, sheet_name='Datos', index=False)
-        logger.info("  ✅ Hoja 'Datos' creada")
-        
-        # Aplicar formato
-        logger.info("  🎨 Aplicando formato...")
-        crear_formato_excel(writer, df)
-        
-        # Crear gráficas
-        logger.info("  📈 Creando gráficas...")
-        crear_graficas(writer, df)
-        
-        logger.info("  ✅ Gráficas creadas")
+    # Crear workbook
+    wb = Workbook()
+    
+    # Crear hoja de datos
+    ws_datos = wb.active
+    ws_datos.title = "Datos"
+    
+    # Escribir datos en la hoja
+    for r_idx, row in enumerate(df.itertuples(index=False), start=1):
+        for c_idx, value in enumerate(row, start=1):
+            ws_datos.cell(row=r_idx, column=c_idx, value=value)
+    
+    # Escribir encabezados
+    for c_idx, column_name in enumerate(df.columns, start=1):
+        ws_datos.cell(row=1, column=c_idx, value=column_name)
+    
+    # Aplicar formato
+    aplicar_formato_excel(wb, ws_datos, df)
+    logger.info("  ✅ Hoja 'Datos' creada con formato")
+    
+    # Crear gráficas
+    crear_graficas_openpyxl(wb, df)
+    logger.info("  ✅ Gráficas creadas")
+    
+    # Guardar archivo
+    wb.save(RUTA_EXCEL)
     
     logger.info("✅ Reporte Excel generado exitosamente")
     logger.info(f"📄 Archivo: {RUTA_EXCEL}")
