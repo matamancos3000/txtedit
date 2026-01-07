@@ -2,6 +2,7 @@ import pandas as pd
 import logging
 import unicodedata
 from pathlib import Path
+from datetime import datetime
 
 # =========================
 # LOGGING
@@ -17,46 +18,47 @@ logger = logging.getLogger(__name__)
 # =========================
 BASE_PATH = Path("c:/Copia-reporte-Aclarabot")
 
-ACLARABOT_CSV = next(BASE_PATH.glob("*.csv"))
+ACLARABOT_CSV = next(BASE_PATH.glob("*.csv"))  # 06-Jan.csv
 ACLARAPP_CSV = BASE_PATH / "Copy-Aclarapp" / "TablaCopiadaDeAclarapp_LIMPIADO.csv"
 AGENTES_CSV = BASE_PATH / "Copy-Aclarapp" / "InfoAgentes.csv"
 
-OUTPUT_FILE = BASE_PATH / "Acumulado_filtrado.csv"
+OUTPUT_FILE = BASE_PATH / f"Acumulado_filtrado_{datetime.now().strftime('%d-%b')}.csv"
 
 # =========================
 # UTILIDADES
 # =========================
-def normalizar_texto(texto):
-    texto = texto.strip()
-    texto = unicodedata.normalize("NFKD", texto)
-    texto = "".join(c for c in texto if not unicodedata.combining(c))
-    texto = texto.replace(" ", "_")
-    return texto.upper()
+def normalizar_columnas(df):
+    def limpiar(col):
+        col = unicodedata.normalize("NFKD", col)
+        col = col.encode("ascii", "ignore").decode("utf-8")
+        col = col.upper().strip()
+        col = col.replace(" ", "_")
+        col = col.replace("__", "_")
+        return col
 
-
-def cargar_csv(ruta, sep=","):
-    df = pd.read_csv(
-        ruta,
-        sep=sep,
-        dtype=str,
-        encoding="utf-8-sig",
-        on_bad_lines="skip"
-    )
-    df.columns = [normalizar_texto(c) for c in df.columns]
-    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    df.columns = [limpiar(c) for c in df.columns]
     return df
 
 
-def convertir_fecha_12h(serie):
-    return pd.to_datetime(
-        serie
-        .str.replace("p.m.", "PM", regex=False)
-        .str.replace("a.m.", "AM", regex=False)
-        .str.replace("P.M.", "PM", regex=False)
-        .str.replace("A.M.", "AM", regex=False),
-        format="%d/%m/%Y %I:%M:%S %p",
-        errors="coerce"
+def buscar_columna(df, palabras_clave):
+    for col in df.columns:
+        for palabra in palabras_clave:
+            if palabra in col:
+                logger.info(f"✔ Columna detectada: {col}")
+                return col
+    raise KeyError(f"No se encontró columna con palabras clave: {palabras_clave}")
+
+
+def cargar_csv(path, sep=","):
+    df = pd.read_csv(
+        path,
+        sep=sep,
+        encoding="utf-8-sig",
+        dtype=str,
+        on_bad_lines="skip"
     )
+    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    return normalizar_columnas(df)
 
 # =========================
 # MAIN
@@ -64,90 +66,72 @@ def convertir_fecha_12h(serie):
 def main():
     logger.info("🚀 Iniciando merge ACLARABOT + ACLARAPP + INFOAGENTES")
 
+    # ========= CARGA =========
     aclarabot_df = cargar_csv(ACLARABOT_CSV)
+    logger.info(f"✓ Aclarabot cargado: {ACLARABOT_CSV.name} ({len(aclarabot_df)} filas)")
+
     aclarapp_df = cargar_csv(ACLARAPP_CSV, sep="|")
+    logger.info(f"✓ Aclarapp cargado ({len(aclarapp_df)} filas)")
+
     agentes_df = cargar_csv(AGENTES_CSV, sep="|")
+    logger.info(f"✓ InfoAgentes cargado ({len(agentes_df)} filas)")
 
-    logger.info("✓ Archivos cargados correctamente")
+    # ========= DETECTAR COLUMNAS =========
+    col_aclarabot_id = buscar_columna(aclarabot_df, ["ACLARACIONID"])
+    col_aclarapp_id = buscar_columna(aclarapp_df, ["ACLARACION"])
 
-    # =========================
-    # RENOMBRES CONTROLADOS
-    # =========================
-    aclarabot_df.rename(columns={
-        "NUMERO_DE_REGISTRO": "NUMERO_REGISTRO"
-    }, inplace=True)
+    col_registro_bot = buscar_columna(aclarabot_df, ["NUMERO_REGISTRO", "REGISTRO"])
+    col_registro_app = buscar_columna(aclarapp_df, ["REGISTRO"])
 
-    aclarapp_df.rename(columns={
-        "ID_ACLARACION": "ID_ACLARACION",
-        "REGISTRO": "REGISTRO",
-        "CIS": "CIS_2"
-    }, inplace=True)
+    col_agente_id = buscar_columna(agentes_df, ["ID"])
 
-    agentes_df.rename(columns={
-        "ID": "ID"
-    }, inplace=True)
-
-    # =========================
-    # MERGE 1: ACLARABOT + ACLARAPP
-    # =========================
-    df_merge = aclarabot_df.merge(
+    # ========= MERGE 1: BOT + APP =========
+    merge_1 = aclarabot_df.merge(
         aclarapp_df,
         how="left",
-        left_on="ACLARACIONID",
-        right_on="ID_ACLARACION"
+        left_on=col_aclarabot_id,
+        right_on=col_aclarapp_id,
+        suffixes=("", "_ACLARAPP")
     )
 
-    # =========================
-    # MERGE 2: + INFOAGENTES
-    # =========================
-    df_final = df_merge.merge(
+    # CIS duplicado
+    if "CIS_ACLARAPP" in merge_1.columns:
+        merge_1.rename(columns={"CIS_ACLARAPP": "CIS_2"}, inplace=True)
+
+    logger.info("✓ Merge ACLARABOT + ACLARAPP completo")
+
+    # ========= MERGE 2: + AGENTES =========
+    df_final = merge_1.merge(
         agentes_df,
         how="left",
-        left_on="NUMERO_REGISTRO",
-        right_on="ID"
+        left_on=col_registro_bot,
+        right_on=col_agente_id,
+        suffixes=("", "_AGENTE")
     )
 
-    # =========================
-    # FECHAS
-    # =========================
-    columnas_fecha = [
-        "FECHA",
-        "FECHA_CREACION",
-        "FECHA_ENVIADO",
-        "FECHA_ASIGNACION",
-        "FECHA_ATENDIDO"
-    ]
+    logger.info("✓ Merge con INFOAGENTES completo")
 
-    for col in columnas_fecha:
-        if col in df_final.columns:
-            df_final[col] = convertir_fecha_12h(df_final[col])
+    # ========= ORDENAR POR FECHA =========
+    col_fecha = buscar_columna(df_final, ["FECHA"])
 
-    df_final.sort_values("FECHA", inplace=True)
+    df_final[col_fecha] = pd.to_datetime(
+        df_final[col_fecha],
+        dayfirst=True,
+        errors="coerce"
+    )
 
-    # =========================
-    # ORDEN FINAL
-    # =========================
-    columnas_finales = [
-        "ENTORNO","FECHA","TIPO_DE_TARJETA","TIPO_DE_ACLARACION",
-        "DETALLES_DE_ACLARACION","NUMERO_REGISTRO","FOLIO_SCC",
-        "CIS","CARGOS","ROBOTID","ACLARACIONID","ESTATUS","DETALLES",
-        "ID_ACLARACION","REGISTRO","FOLIO","CIS_2",
-        "FECHA_CREACION","FECHA_ENVIADO","FECHA_ASIGNACION",
-        "FECHA_ATENDIDO","ESTADO_ACTUAL","INTENTOS","ACCIONES",
-        "ID","NOMBRE","SUPERVISOR","SITE","SKILL"
-    ]
+    df_final = df_final.sort_values(by=col_fecha)
 
-    columnas_existentes = [c for c in columnas_finales if c in df_final.columns]
-    df_final = df_final[columnas_existentes]
+    # ========= EXPORTAR CSV =========
+    df_final.to_csv(
+        OUTPUT_FILE,
+        index=False,
+        encoding="utf-8-sig"
+    )
 
-    # =========================
-    # EXPORTAR
-    # =========================
-    df_final.to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
-
-    logger.info("✅ Proceso finalizado correctamente")
+    logger.info("✅ PROCESO COMPLETADO")
     logger.info(f"📄 Archivo generado: {OUTPUT_FILE}")
-    logger.info(f"📊 Total filas: {len(df_final)}")
+    logger.info(f"📊 Total registros: {len(df_final)}")
 
 
 if __name__ == "__main__":
