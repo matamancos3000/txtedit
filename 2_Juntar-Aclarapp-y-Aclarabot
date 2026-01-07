@@ -178,26 +178,26 @@ def limpiar_cis(valor):
 
 def corregir_fecha_creacion_despues_de_exportar(df):
     """
-    Función específica para corregir la columna 'Fecha Creación' después del merge
+    Función específica para corregir la columna 'Fecha Creacion' después del merge
     """
-    if "Fecha Creación" not in df.columns:
-        logger.warning("Columna 'Fecha Creación' no encontrada para corregir")
+    if "Fecha Creacion" not in df.columns:
+        logger.warning("Columna 'Fecha Creacion' no encontrada para corregir")
         return df
     
     logger.info("\n" + "="*60)
-    logger.info("CORRIGIENDO COLUMNA 'FECHA CREACIÓN' DESPUÉS DEL MERGE")
+    logger.info("CORRIGIENDO COLUMNA 'FECHA CREACIon' DESPUÉS DEL MERGE")
     logger.info("="*60)
     
     # Contar valores antes
-    valores_antes = df["Fecha Creación"].notna().sum()
-    logger.info(f"Valores no nulos en 'Fecha Creación': {valores_antes}")
+    valores_antes = df["Fecha Creacion"].notna().sum()
+    logger.info(f"Valores no nulos en 'Fecha Creacion': {valores_antes}")
     
     if valores_antes == 0:
         logger.info("No hay valores para corregir")
         return df
     
     # Analizar el formato actual
-    ejemplos_antes = df["Fecha Creación"].dropna().head(5).tolist()
+    ejemplos_antes = df["Fecha Creacion"].dropna().head(5).tolist()
     logger.info("Ejemplos ANTES de corrección:")
     
     formatos_detectados = set()
@@ -221,13 +221,13 @@ def corregir_fecha_creacion_despues_de_exportar(df):
     
     # Aplicar corrección solo si hay fechas con AM/PM o formato incorrecto
     if "CON_AMPM" in formatos_detectados or "CON_BARRAS" in formatos_detectados:
-        logger.info(f"\nAplicando corrección a 'Fecha Creación'...")
+        logger.info(f"\nAplicando corrección a 'Fecha Creacion'...")
         
         # Guardar estado original para comparación
-        estado_original = df["Fecha Creación"].copy()
+        estado_original = df["Fecha Creacion"].copy()
         
         # Aplicar conversión
-        df["Fecha Creación"] = df["Fecha Creación"].apply(convertir_formato_12h_a_iso)
+        df["Fecha Creacion"] = df["Fecha Creacion"].apply(convertir_formato_12h_a_iso)
         
         # Contar cambios
         cambios = 0
@@ -236,7 +236,7 @@ def corregir_fecha_creacion_despues_de_exportar(df):
         
         for idx in df.index:
             original = estado_original[idx]
-            nuevo = df.loc[idx, "Fecha Creación"]
+            nuevo = df.loc[idx, "Fecha Creacion"]
             
             if pd.notna(original) and pd.notna(nuevo):
                 total += 1
@@ -253,7 +253,7 @@ def corregir_fecha_creacion_despues_de_exportar(df):
                 logger.info(f"  [{i}] '{orig}' → '{nuevo}'")
         
         # Verificar formato después
-        ejemplos_despues = df["Fecha Creación"].dropna().head(3).tolist()
+        ejemplos_despues = df["Fecha Creacion"].dropna().head(3).tolist()
         logger.info("\nEjemplos DESPUÉS de corrección:")
         formatos_correctos = 0
         for i, ejemplo in enumerate(ejemplos_despues):
@@ -287,7 +287,7 @@ def main():
     
     # Procesar todas las fechas de Aclarapp
     columnas_fecha_aclaraapp = [
-        "Fecha Creación", 
+        "Fecha Creacion", 
         "Fecha Enviado", 
         "Fecha Asignacion", 
         "Fecha Atendido"
@@ -387,7 +387,7 @@ def main():
     df_final.drop(columns=["_merge"], inplace=True)
 
     # =========================
-    # 6. CORREGIR 'FECHA CREACIÓN' DESPUÉS DEL MERGE
+    # 6. CORREGIR 'FECHA CREACIon' DESPUÉS DEL MERGE
     # =========================
     df_final = corregir_fecha_creacion_despues_de_exportar(df_final)
 
@@ -400,7 +400,7 @@ def main():
     
     todas_columnas_fecha = [
         "Fecha", 
-        "Fecha Creación", 
+        "Fecha Creacion", 
         "Fecha Enviado", 
         "Fecha Asignacion", 
         "Fecha Atendido"
@@ -489,20 +489,20 @@ def main():
         encoding="utf-8-sig"
     )
     
-    # Aplicar corrección FINAL a 'Fecha Creación'
-    logger.info("\nAPLICANDO CORRECCIÓN FINAL A 'FECHA CREACIÓN'...")
+    # Aplicar corrección FINAL a 'Fecha Creacion'
+    logger.info("\nAPLICANDO CORRECCIÓN FINAL A 'FECHA CREACIon'...")
     
-    if "Fecha Creación" in df_corregido.columns:
+    if "Fecha Creacion" in df_corregido.columns:
         valores_totales = len(df_corregido)
-        valores_no_nulos = df_corregido["Fecha Creación"].notna().sum()
+        valores_no_nulos = df_corregido["Fecha Creacion"].notna().sum()
         
         logger.info(f"Total de filas: {valores_totales}")
         logger.info(f"Fechas no nulas: {valores_no_nulos}")
         
         if valores_no_nulos > 0:
             # Mostrar estado actual
-            ejemplos_actuales = df_corregido["Fecha Creación"].dropna().head(5).tolist()
-            logger.info("Estado ACTUAL de 'Fecha Creación':")
+            ejemplos_actuales = df_corregido["Fecha Creacion"].dropna().head(5).tolist()
+            logger.info("Estado ACTUAL de 'Fecha Creacion':")
             
             for i, ejemplo in enumerate(ejemplos_actuales):
                 logger.info(f"  [{i}] '{ejemplo}'")
@@ -528,13 +528,13 @@ def main():
                 ejemplos_conversion = []
                 
                 for idx in df_corregido.index:
-                    valor_original = df_corregido.loc[idx, "Fecha Creación"]
+                    valor_original = df_corregido.loc[idx, "Fecha Creacion"]
                     
                     if pd.notna(valor_original):
                         nuevo_valor = convertir_formato_12h_a_iso(valor_original)
                         
                         if nuevo_valor is not None:
-                            df_corregido.loc[idx, "Fecha Creación"] = nuevo_valor
+                            df_corregido.loc[idx, "Fecha Creacion"] = nuevo_valor
                             convertidos += 1
                             
                             if len(ejemplos_conversion) < 3 and valor_original != nuevo_valor:
@@ -551,8 +551,8 @@ def main():
                         logger.info(f"  [{i}] '{orig}' → '{nuevo}'")
                 
                 # Verificar formato después
-                ejemplos_finales = df_corregido["Fecha Creación"].dropna().head(3).tolist()
-                logger.info("\nFormato FINAL de 'Fecha Creación':")
+                ejemplos_finales = df_corregido["Fecha Creacion"].dropna().head(3).tolist()
+                logger.info("\nFormato FINAL de 'Fecha Creacion':")
                 
                 for i, ejemplo in enumerate(ejemplos_finales):
                     if isinstance(ejemplo, str) and re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', ejemplo):
