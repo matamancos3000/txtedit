@@ -21,7 +21,6 @@ BASE_PATH = Path("c:/Copia-reporte-Aclarabot")
 EXCEL_PATH = BASE_PATH / "archivos_Excel"
 EXCEL_PATH.mkdir(exist_ok=True)
 
-# Buscar CSV acumulado
 CSV_FILE = next(BASE_PATH.glob("Acumulado_filtrado_*.csv"))
 
 # Locale español para nombre del archivo
@@ -31,7 +30,7 @@ except:
     try:
         locale.setlocale(locale.LC_TIME, "es_ES")
     except:
-        logger.warning("⚠️ No se pudo configurar locale en español")
+        logger.warning("⚠️ Locale español no disponible")
 
 HOY = datetime.now()
 FECHA_TEXTO = HOY.strftime("%d-%B").capitalize()
@@ -71,39 +70,11 @@ COLUMNAS_SALIDA = [
 # FUNCIONES
 # =========================
 def convertir_fecha(df, columna):
-    if columna not in df.columns:
-        return
-
-    # ---- yyyy-dd-MM HH:mm:ss ----
-    if columna in ["Fecha", "Fecha Enviado", "Fecha Asignacion", "Fecha Atendido"]:
+    """Convierte fechas con formato yyyy-MM-dd HH:mm:ss"""
+    if columna in df.columns:
         df[columna] = pd.to_datetime(
             df[columna],
-            format="%Y-%d-%m %H:%M:%S",
-            errors="coerce"
-        )
-
-    # ---- dd/MM/yyyy hh:mm:ss AM/PM → yyyy-dd-MM HH:mm:ss ----
-    elif columna == "Fecha Creacion":
-        df[columna] = (
-            df[columna]
-            .astype(str)
-            .str.strip()
-            .str.replace(r"p\.\s*m\.", "PM", regex=True)
-            .str.replace(r"a\.\s*m\.", "AM", regex=True)
-        )
-
-        # Parsear formato original
-        df[columna] = pd.to_datetime(
-            df[columna],
-            format="%d/%m/%Y %I:%M:%S %p",
-            errors="coerce"
-        )
-
-        # Unificar formato
-        df[columna] = df[columna].dt.strftime("%Y-%d-%m %H:%M:%S")
-        df[columna] = pd.to_datetime(
-            df[columna],
-            format="%Y-%d-%m %H:%M:%S",
+            format="%Y-%m-%d %H:%M:%S",
             errors="coerce"
         )
 
@@ -126,10 +97,10 @@ def main():
     # FILTRAR ESTATUS TRUE
     # =========================
     df = df[df["Estatus"] == "True"].copy()
-    logger.info(f"✓ Filtrado Estatus=True → {len(df)} filas")
+    logger.info(f"✓ Estatus=True → {len(df)} filas")
 
     # =========================
-    # LIMPIAR CIS / CIS_1 (ANTES DE SELECCIONAR COLUMNAS)
+    # LIMPIAR CIS / CIS_1
     # =========================
     for col in ["CIS", "CIS_1"]:
         if col in df.columns:
@@ -174,16 +145,18 @@ def main():
         df["Tiempo de alta robot"] * 60
     )
 
-    # Eliminar tiempos negativos
+    # Evitar tiempos negativos
     df.loc[df["Tiempo de captura agente"] < 0, "Tiempo de captura agente"] = None
     df.loc[df["Tiempo de alta robot"] < 0, "Tiempo de alta robot"] = None
 
     # =========================
     # OTRAS TRANSFORMACIONES
     # =========================
-    df["Numero de cargos"] = pd.to_numeric(df["Cargos"], errors="coerce")
-    df["Estatus"] = "Exitoso"
+    df["Numero de cargos"] = pd.to_numeric(
+        df["Cargos"], errors="coerce"
+    )
 
+    df["Estatus"] = "Exitoso"
     df.rename(columns={"NOMBRE": "Nombre Agente"}, inplace=True)
 
     # =========================
@@ -204,7 +177,7 @@ def main():
 
     logger.info("✅ Reporte Excel generado correctamente")
     logger.info(f"📊 Filas finales: {len(df_final)}")
-    logger.info(f"📁 Ruta: {OUTPUT_FILE}")
+    logger.info(f"📁 Ubicación: {OUTPUT_FILE}")
 
 # =========================
 # EJECUCIÓN
