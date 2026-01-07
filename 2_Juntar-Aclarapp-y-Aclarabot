@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 # =========================
 BASE_PATH = Path("c:/Copia-reporte-Aclarabot")
 
-ACLARABOT_CSV = next(BASE_PATH.glob("*.csv"))  # 06-Jan.csv
 ACLARAPP_CSV = BASE_PATH / "Copy-Aclarapp" / "TablaCopiadaDeAclarapp_LIMPIADO.csv"
 AGENTES_CSV = BASE_PATH / "Copy-Aclarapp" / "InfoAgentes.csv"
 
@@ -66,17 +65,30 @@ def cargar_csv(path, sep=","):
 def main():
     logger.info("🚀 Iniciando merge ACLARABOT + ACLARAPP + INFOAGENTES")
 
-    # ========= CARGA =========
-    aclarabot_df = cargar_csv(ACLARABOT_CSV)
-    logger.info(f"✓ Aclarabot cargado: {ACLARABOT_CSV.name} ({len(aclarabot_df)} filas)")
+    # ========= 1. CARGAR TODOS LOS CSV DE ACLARABOT =========
+    aclarabot_dfs = []
 
+    aclarabot_csvs = list(BASE_PATH.glob("*.csv"))
+    if not aclarabot_csvs:
+        raise FileNotFoundError("❌ No se encontraron CSV de Aclarabot")
+
+    for csv_file in aclarabot_csvs:
+        df = cargar_csv(csv_file)
+        aclarabot_dfs.append(df)
+        logger.info(f"✓ Aclarabot cargado: {csv_file.name} ({len(df)} filas)")
+
+    aclarabot_df = pd.concat(aclarabot_dfs, ignore_index=True)
+    logger.info(f"📊 Total Aclarabot acumulado: {len(aclarabot_df)} filas")
+
+    # ========= 2. CARGAR ACLARAPP =========
     aclarapp_df = cargar_csv(ACLARAPP_CSV, sep="|")
     logger.info(f"✓ Aclarapp cargado ({len(aclarapp_df)} filas)")
 
+    # ========= 3. CARGAR INFOAGENTES =========
     agentes_df = cargar_csv(AGENTES_CSV, sep="|")
     logger.info(f"✓ InfoAgentes cargado ({len(agentes_df)} filas)")
 
-    # ========= DETECTAR COLUMNAS =========
+    # ========= 4. DETECTAR COLUMNAS =========
     col_aclarabot_id = buscar_columna(aclarabot_df, ["ACLARACIONID"])
     col_aclarapp_id = buscar_columna(aclarapp_df, ["ACLARACION"])
 
@@ -85,7 +97,7 @@ def main():
 
     col_agente_id = buscar_columna(agentes_df, ["ID"])
 
-    # ========= MERGE 1: BOT + APP =========
+    # ========= 5. MERGE ACLARABOT + ACLARAPP =========
     merge_1 = aclarabot_df.merge(
         aclarapp_df,
         how="left",
@@ -100,7 +112,7 @@ def main():
 
     logger.info("✓ Merge ACLARABOT + ACLARAPP completo")
 
-    # ========= MERGE 2: + AGENTES =========
+    # ========= 6. MERGE CON INFOAGENTES =========
     df_final = merge_1.merge(
         agentes_df,
         how="left",
@@ -111,7 +123,7 @@ def main():
 
     logger.info("✓ Merge con INFOAGENTES completo")
 
-    # ========= ORDENAR POR FECHA =========
+    # ========= 7. ORDENAR POR FECHA =========
     col_fecha = buscar_columna(df_final, ["FECHA"])
 
     df_final[col_fecha] = pd.to_datetime(
@@ -122,7 +134,7 @@ def main():
 
     df_final = df_final.sort_values(by=col_fecha)
 
-    # ========= EXPORTAR CSV =========
+    # ========= 8. EXPORTAR =========
     df_final.to_csv(
         OUTPUT_FILE,
         index=False,
@@ -131,7 +143,7 @@ def main():
 
     logger.info("✅ PROCESO COMPLETADO")
     logger.info(f"📄 Archivo generado: {OUTPUT_FILE}")
-    logger.info(f"📊 Total registros: {len(df_final)}")
+    logger.info(f"📊 Total registros finales: {len(df_final)}")
 
 
 if __name__ == "__main__":
