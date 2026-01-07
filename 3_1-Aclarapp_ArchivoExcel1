@@ -24,7 +24,7 @@ EXCEL_PATH.mkdir(exist_ok=True)
 # Buscar CSV acumulado
 CSV_FILE = next(BASE_PATH.glob("Acumulado_filtrado_*.csv"))
 
-# Configurar locale español (solo para nombre del archivo)
+# Locale español solo para el nombre del archivo
 try:
     locale.setlocale(locale.LC_TIME, "Spanish_Spain")
 except:
@@ -38,7 +38,7 @@ FECHA_TEXTO = HOY.strftime("%d-%B").capitalize()  # Ej: 7-Enero
 OUTPUT_FILE = EXCEL_PATH / f"Reporte_Aclarapp_{FECHA_TEXTO}.xlsx"
 
 # =========================
-# COLUMNAS
+# COLUMNAS DE SALIDA
 # =========================
 COLUMNAS_SALIDA = [
     "Fecha",
@@ -72,7 +72,7 @@ COLUMNAS_SALIDA = [
 # =========================
 def convertir_fecha(df, columna):
     """
-    Convierte fechas considerando formatos distintos por columna:
+    Maneja formatos mixtos de fecha:
     - Fecha / Fecha Enviado / Fecha Asignacion / Fecha Atendido:
       yyyy-dd-MM HH:mm:ss
     - Fecha Creacion:
@@ -121,7 +121,7 @@ def main():
     logger.info(f"✓ CSV cargado: {CSV_FILE.name} ({len(df)} filas)")
 
     # =========================
-    # FILTRAR ESTATUS FALSE
+    # FILTRAR ESTATUS TRUE
     # =========================
     df = df[df["Estatus"] == "True"].copy()
     logger.info(f"✓ Filtrado Estatus=True → {len(df)} filas")
@@ -143,7 +143,7 @@ def main():
         logger.info(f"📅 {col}: {validas}/{len(df)} fechas válidas")
 
     # =========================
-    # TIEMPOS
+    # CÁLCULO DE TIEMPOS
     # =========================
     df["Tiempo de captura agente"] = minutos_entre(
         df["Fecha Enviado"], df["Fecha Creacion"]
@@ -164,6 +164,18 @@ def main():
     # Evitar tiempos negativos
     df.loc[df["Tiempo de captura agente"] < 0, "Tiempo de captura agente"] = None
     df.loc[df["Tiempo de alta robot"] < 0, "Tiempo de alta robot"] = None
+
+    # =========================
+    # LIMPIAR CIS Y CIS_1 (solo números)
+    # =========================
+    for col in ["CIS", "CIS_1"]:
+        if col in df.columns:
+            df[col] = (
+                df[col]
+                .astype(str)
+                .str.replace(r"\D+", "", regex=True)
+                .replace("", None)
+            )
 
     # =========================
     # OTRAS TRANSFORMACIONES
