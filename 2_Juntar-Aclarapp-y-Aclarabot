@@ -55,15 +55,10 @@ def limpiar_formato_fecha_especial(valor):
     
     valor_str = str(valor).strip()
     
-    # Si el valor ya está vacío, regresar
     if not valor_str or valor_str.lower() in ['nan', 'nat', 'null', 'none', '']:
         return valor
     
-    # DEBUG: Mostrar formato original (solo para debug)
-    # logger.debug(f"  Formato original: '{valor_str}'")
-    
-    # PRIMERO: Corregir el espacio entre p. y m. / a. y m.
-    # Patrones: "p. m." o "a. m." con cualquier cantidad de espacios
+    # Corregir el espacio entre p. y m. / a. y m.
     valor_str = re.sub(r'p\.\s*m\.', 'PM', valor_str, flags=re.IGNORECASE)
     valor_str = re.sub(r'a\.\s*m\.', 'AM', valor_str, flags=re.IGNORECASE)
     
@@ -71,20 +66,58 @@ def limpiar_formato_fecha_especial(valor):
     valor_str = re.sub(r'p\s+m', 'PM', valor_str, flags=re.IGNORECASE)
     valor_str = re.sub(r'a\s+m', 'AM', valor_str, flags=re.IGNORECASE)
     
-    # SEGUNDO: Si todavía quedan puntos en AM/PM, quitarlos
+    # Si todavía quedan puntos en AM/PM, quitarlos
     valor_str = re.sub(r'\bp\.m\.\b', 'PM', valor_str, flags=re.IGNORECASE)
     valor_str = re.sub(r'\ba\.m\.\b', 'AM', valor_str, flags=re.IGNORECASE)
     
-    # TERCERO: Quitar espacios extra alrededor de AM/PM
+    # Quitar espacios extra alrededor de AM/PM
     valor_str = re.sub(r'\s+([AP]M)\s*$', r' \1', valor_str)
     
-    # CUARTO: Asegurar un solo espacio entre la hora y AM/PM
+    # Asegurar un solo espacio entre la hora y AM/PM
     valor_str = re.sub(r'(\d)\s+([AP]M)$', r'\1 \2', valor_str)
     
-    # DEBUG: Mostrar formato limpiado
-    # logger.debug(f"  Formato limpiado: '{valor_str}'")
-    
     return valor_str.strip()
+
+def convertir_fecha_aclaraapp(valor):
+    """
+    Función específica para convertir fechas de Aclarapp de formato 12h a 24h
+    """
+    if pd.isna(valor):
+        return valor
+    
+    valor_str = str(valor).strip()
+    
+    if not valor_str or valor_str.lower() in ['nan', 'nat', 'null', 'none', '']:
+        return valor
+    
+    # Primero aplicar la limpieza especial
+    valor_limpio = limpiar_formato_fecha_especial(valor_str)
+    
+    try:
+        # Intentar convertir de formato 12h a datetime
+        fecha_dt = pd.to_datetime(
+            valor_limpio,
+            format="%d/%m/%Y %I:%M:%S %p",
+            errors="raise"
+        )
+        
+        # Convertir a string con formato de 24 horas
+        return fecha_dt.strftime("%d/%m/%Y %H:%M:%S")
+        
+    except Exception as e:
+        logger.warning(f"No se pudo convertir fecha Aclarapp: '{valor_str}' -> Error: {e}")
+        
+        # Si falla, intentar otros formatos
+        try:
+            # Intentar como datetime sin formato específico
+            fecha_dt = pd.to_datetime(valor_limpio, dayfirst=True, errors="coerce")
+            if pd.notna(fecha_dt):
+                return fecha_dt.strftime("%d/%m/%Y %H:%M:%S")
+        except:
+            pass
+        
+        # Si todo falla, devolver el valor original
+        return valor_str
 
 # =========================
 # MAIN
@@ -98,18 +131,54 @@ def main():
     aclarabot_df = cargar_csv(ACLARABOT_PATH)
     logger.info(f"✓ Aclarabot cargado: {ACLARABOT_PATH.name} ({len(aclarabot_df)} filas)")
     
-    # DEBUG: Mostrar primeras filas y formato de fecha
     if "Fecha" in aclarabot_df.columns:
         logger.info(f"📋 Ejemplos de formato 'Fecha' en Aclarabot (primeras 5):")
         for i in range(min(5, len(aclarabot_df))):
             fecha_ejemplo = aclarabot_df['Fecha'].iloc[i]
             logger.info(f"  Fila {i}: '{fecha_ejemplo}'")
-            # Mostrar también la longitud para ver espacios ocultos
-            if fecha_ejemplo and str(fecha_ejemplo) != 'nan':
-                logger.info(f"    Longitud: {len(str(fecha_ejemplo))} caracteres")
 
     aclarapp_df = cargar_csv(ACLARAPP_PATH, sep="|")
     logger.info(f"✓ Aclarapp cargado ({len(aclarapp_df)} filas)")
+    
+    # =========================
+    # CONVERTIR FECHAS DE ACLARAPP ANTES DEL MERGE
+    # =========================
+    logger.info("\n🔄 CONVIRTIENDO FECHAS DE ACLARAPP A FORMATO 24 HORAS")
+    
+    columnas_fecha_aclaraapp = [
+        "Fecha Creación", 
+        "Fecha Enviado", 
+        "Fecha Asignacion", 
+        "Fecha Atendido"
+    ]
+    
+    for col in columnas_fecha_aclaraapp:
+        if col in aclarapp_df.columns:
+            logger.info(f"Procesando columna Aclarapp: {col}")
+            
+            # Contar valores no nulos
+            valores_no_nulos = aclarapp_df[col].notna().sum()
+            logger.info(f"  Valores no nulos: {valores_no_nulos}")
+            
+            if valores_no_nulos > 0:
+                # Mostrar ejemplos antes de la conversión
+                ejemplos_antes = aclarapp_df[col].dropna().head(3).tolist()
+                logger.info(f"  Ejemplos ANTES de conversión:")
+                for i, ejemplo in enumerate(ejemplos_antes):
+                    logger.info(f"    {i}: '{ejemplo}'")
+                
+                # Aplicar conversión
+                aclarapp_df[col] = aclarapp_df[col].apply(convertir_fecha_aclaraapp)
+                
+                # Mostrar ejemplos después de la conversión
+                ejemplos_despues = aclarapp_df[col].dropna().head(3).tolist()
+                logger.info(f"  Ejemplos DESPUÉS de conversión:")
+                for i, ejemplo in enumerate(ejemplos_despues):
+                    logger.info(f"    {i}: '{ejemplo}'")
+                
+                # Verificar conversión
+                convertidos = aclarapp_df[col].dropna().count()
+                logger.info(f"  ✅ Convertidos: {convertidos}/{valores_no_nulos}")
 
     agentes_df = cargar_csv(AGENTES_PATH, sep="|")
     logger.info(f"✓ InfoAgentes cargado ({len(agentes_df)} filas)")
@@ -151,91 +220,44 @@ def main():
     df_final.drop(columns=["_merge"], inplace=True)
 
     # =========================
-    # NORMALIZAR TODAS LAS COLUMNAS DE FECHA A FORMATO 24 HORAS
+    # NORMALIZAR COLUMNA FECHA PRINCIPAL (de Aclarabot)
     # =========================
-    logger.info("🔄 Normalizando columnas de fecha a formato 24h...")
+    logger.info("\n🔄 Normalizando columna 'Fecha' (de Aclarabot)...")
     
-    columnas_fecha = [
-        "Fecha", 
-        "Fecha Creación", 
-        "Fecha Enviado", 
-        "Fecha Asignacion", 
-        "Fecha Atendido"
-    ]
-    
-    for col in columnas_fecha:
-        if col in df_final.columns:
-            logger.info(f"\n📅 Procesando columna: {col}")
-            
-            # Contar valores no nulos antes
-            valores_originales = df_final[col].notna().sum()
-            logger.info(f"  Valores no nulos originales: {valores_originales}")
-            
-            if valores_originales > 0:
-                # Mostrar algunos ejemplos del formato original
-                ejemplos = df_final[col].dropna().head(3).tolist()
-                for i, ejemplo in enumerate(ejemplos):
-                    logger.info(f"  Ejemplo {i} original: '{ejemplo}'")
-            
-            # PRIMERO: Aplicar limpieza especial para formato con espacio entre p. y m.
-            logger.info(f"  Aplicando limpieza de formato especial...")
-            df_final[col] = df_final[col].apply(limpiar_formato_fecha_especial)
-            
-            # Mostrar ejemplos después de la limpieza
-            if valores_originales > 0:
-                ejemplos_limpios = df_final[col].dropna().head(3).tolist()
-                for i, ejemplo in enumerate(ejemplos_limpios):
-                    logger.info(f"  Ejemplo {i} limpio: '{ejemplo}'")
-            
-            # SEGUNDO: Convertir a datetime
-            logger.info(f"  Convirtiendo a datetime...")
-            try:
-                # Primero intentar con el formato esperado
-                df_final[col] = pd.to_datetime(
-                    df_final[col],
-                    format="%d/%m/%Y %I:%M:%S %p",  # Formato con AM/PM
-                    errors="coerce"
-                )
-                
-                # Verificar cuántos se convirtieron
-                convertidos_formato = df_final[col].notna().sum()
-                logger.info(f"  Convertidos con formato específico: {convertidos_formato}/{valores_originales}")
-                
-                # Si muchos no se convirtieron, intentar otros métodos
-                if convertidos_formato < valores_originales * 0.8:  # Menos del 80%
-                    logger.info(f"  Intentando parseo automático (dayfirst=True)...")
-                    df_final[col] = pd.to_datetime(
-                        df_final[col],
-                        dayfirst=True,  # Importante para dd/mm/yyyy
-                        errors="coerce"
-                    )
-                    
-                # También intentar sin dayfirst como último recurso
-                if df_final[col].isna().sum() > 0:
-                    no_convertidos = df_final[col].isna().sum()
-                    logger.info(f"  {no_convertidos} valores no convertidos, intentando método flexible...")
-                    
-                    # Para los no convertidos, intentar uno por uno
-                    for idx in df_final[df_final[col].isna()].index[:5]:  # Solo primeros 5 para debug
-                        valor_original = df_final.loc[idx, col]
-                        if pd.notna(valor_original):
-                            logger.warning(f"    No se pudo convertir: '{valor_original}'")
-                
-            except Exception as e:
-                logger.error(f"  Error convirtiendo {col}: {e}")
-                df_final[col] = pd.to_datetime(df_final[col], errors="coerce")
-            
-            # Verificar conversión final
-            nulos_finales = df_final[col].isna().sum()
-            convertidas_final = valores_originales - nulos_finales
-            logger.info(f"  ✅ Fechas convertidas final: {convertidas_final}/{valores_originales}")
-            
-            if nulos_finales > 0 and nulos_finales < 10:
-                # Mostrar algunas fechas problemáticas
-                logger.warning(f"  ⚠️  {nulos_finales} fechas no convertidas")
-                fechas_problematicas = df_final.loc[df_final[col].isna(), col].head(5)
-                for idx, valor in fechas_problematicas.items():
-                    logger.warning(f"    Índice {idx}: '{valor}'")
+    if "Fecha" in df_final.columns:
+        logger.info(f"Procesando columna: Fecha")
+        
+        valores_originales = df_final["Fecha"].notna().sum()
+        logger.info(f"  Valores no nulos originales: {valores_originales}")
+        
+        if valores_originales > 0:
+            # Mostrar ejemplos originales
+            ejemplos = df_final["Fecha"].dropna().head(3).tolist()
+            logger.info(f"  Ejemplos originales:")
+            for i, ejemplo in enumerate(ejemplos):
+                logger.info(f"    {i}: '{ejemplo}'")
+        
+        # Aplicar limpieza y conversión
+        df_final["Fecha"] = df_final["Fecha"].apply(limpiar_formato_fecha_especial)
+        
+        # Convertir a datetime
+        df_final["Fecha"] = pd.to_datetime(
+            df_final["Fecha"],
+            format="%d/%m/%Y %I:%M:%S %p",
+            dayfirst=True,
+            errors="coerce"
+        )
+        
+        # Verificar conversión
+        convertidos = df_final["Fecha"].notna().sum()
+        logger.info(f"  ✅ Fechas convertidas: {convertidos}/{valores_originales}")
+        
+        if convertidos > 0:
+            # Mostrar ejemplos después de conversión
+            ejemplos_dt = df_final["Fecha"].dropna().head(3).tolist()
+            logger.info(f"  Ejemplos como datetime:")
+            for i, ejemplo in enumerate(ejemplos_dt):
+                logger.info(f"    {i}: {ejemplo}")
 
     # =========================
     # ORDENAR POR FECHA (de más antigua a más actual)
@@ -243,20 +265,16 @@ def main():
     if "Fecha" in df_final.columns:
         logger.info(f"\n📊 Ordenando por columna 'Fecha' (de más antigua a más actual)")
         
-        # Verificar si tenemos fechas válidas
         fechas_validas = df_final["Fecha"].notna().sum()
         logger.info(f"  Fechas válidas para ordenar: {fechas_validas}/{len(df_final)}")
         
         if fechas_validas > 0:
-            # Mostrar rango de fechas antes de ordenar
             fecha_min = df_final["Fecha"].min()
             fecha_max = df_final["Fecha"].max()
             logger.info(f"  Rango de fechas: {fecha_min} a {fecha_max}")
             
-            # Ordenar
             df_final.sort_values("Fecha", inplace=True, na_position="last")
             
-            # Verificar ordenamiento
             primera_fecha = df_final["Fecha"].iloc[0] if fechas_validas > 0 else None
             ultima_fecha_valida = df_final["Fecha"].iloc[fechas_validas-1] if fechas_validas > 0 else None
             
@@ -268,17 +286,45 @@ def main():
         logger.warning("⚠️ No se encontró columna 'Fecha' para ordenar")
 
     # =========================
-    # FORMATEAR FECHAS PARA SALIDA
+    # FORMATEAR TODAS LAS FECHAS PARA SALIDA
     # =========================
-    logger.info("\n💾 Formateando fechas para salida CSV...")
-    for col in columnas_fecha:
+    logger.info("\n💾 Formateando TODAS las fechas para salida CSV...")
+    
+    todas_columnas_fecha = [
+        "Fecha", 
+        "Fecha Creación", 
+        "Fecha Enviado", 
+        "Fecha Asignacion", 
+        "Fecha Atendido"
+    ]
+    
+    for col in todas_columnas_fecha:
         if col in df_final.columns:
-            # Formatear solo las fechas no nulas
-            mask = df_final[col].notna()
-            count_format = mask.sum()
-            if count_format > 0:
-                df_final.loc[mask, col] = df_final.loc[mask, col].dt.strftime("%d/%m/%Y %H:%M:%S")
-                logger.info(f"  {col}: {count_format} fechas formateadas a dd/MM/YYYY HH:MM:SS")
+            # Para la columna Fecha (de Aclarabot) que está como datetime
+            if col == "Fecha":
+                mask = df_final[col].notna()
+                count_format = mask.sum()
+                if count_format > 0:
+                    df_final.loc[mask, col] = df_final.loc[mask, col].dt.strftime("%d/%m/%Y %H:%M:%S")
+                    logger.info(f"  {col}: {count_format} fechas formateadas a dd/MM/YYYY HH:MM:SS")
+            
+            # Para las columnas de Aclarapp (ya convertidas)
+            else:
+                # Verificar que tienen el formato correcto
+                valores_no_nulos = df_final[col].notna().sum()
+                if valores_no_nulos > 0:
+                    logger.info(f"  {col}: {valores_no_nulos} valores (ya en formato 24h)")
+                    
+                    # Verificar que estén en el formato correcto
+                    ejemplos = df_final[col].dropna().head(3).tolist()
+                    for i, ejemplo in enumerate(ejemplos):
+                        if isinstance(ejemplo, str):
+                            logger.info(f"    Ejemplo {i}: '{ejemplo}'")
+                            # Verificar formato
+                            if re.match(r'\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}', ejemplo):
+                                logger.info(f"      ✓ Formato 24h correcto")
+                            else:
+                                logger.warning(f"      ⚠️ Formato diferente: {ejemplo}")
 
     # =========================
     # EXPORTAR CSV
@@ -295,13 +341,16 @@ def main():
     logger.info(f"📊 Total filas: {len(df_final)}")
     
     # Resumen final
-    logger.info("\n📊 RESUMEN FINAL:")
+    logger.info("\n📊 RESUMEN FINAL DE FECHAS:")
     logger.info("=" * 50)
-    for col in columnas_fecha:
+    for col in todas_columnas_fecha:
         if col in df_final.columns:
             no_nulos = df_final[col].notna().sum()
-            logger.info(f"{col:<20}: {no_nulos:>5}/{len(df_final):<5} valores")
-    
+            if no_nulos > 0:
+                ejemplo = df_final[col].dropna().iloc[0]
+                logger.info(f"{col:<20}: {no_nulos:>5} valores | Ejemplo: '{ejemplo}'")
+            else:
+                logger.info(f"{col:<20}: {no_nulos:>5} valores")
     logger.info("=" * 50)
 
 # =========================
