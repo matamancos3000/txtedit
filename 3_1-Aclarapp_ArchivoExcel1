@@ -131,9 +131,10 @@ def calcular_tiempos_agente_robot(df):
     
     # Verificar columnas necesarias
     columnas_requeridas = ["Fecha Creacion", "Fecha Enviado"]
-    for col in columnes_requeridas:
+    for col in columnas_requeridas:
         if col not in df.columns:
             logger.error(f"❌ Columna '{col}' no encontrada para cálculo")
+            # En lugar de retornar, continuamos pero sin calcular
             return df
     
     # Calcular diferencia en segundos
@@ -184,6 +185,10 @@ def calcular_tiempos_agente_robot(df):
             logger.info(f"    Mínimo: {min_seg:.0f}s ({calcular_tiempo_en_minutos_segundos(min_seg)})")
             logger.info(f"    Máximo: {max_seg:.0f}s ({calcular_tiempo_en_minutos_segundos(max_seg)})")
             logger.info(f"    Promedio: {mean_seg:.0f}s ({calcular_tiempo_en_minutos_segundos(mean_seg)})")
+    else:
+        logger.warning("  ⚠️ No hay filas con ambas fechas válidas para calcular")
+        df["Tiempo de captura agente"] = None
+        df["Tiempo de captura agente segundos"] = None
     
     # =========================
     # 2. TIEMPO DE ALTA ROBOT (Fecha Atendido - Fecha Asignacion)
@@ -192,9 +197,10 @@ def calcular_tiempos_agente_robot(df):
     
     # Verificar columnas necesarias
     columnas_requeridas = ["Fecha Asignacion", "Fecha Atendido"]
-    for col in columnes_requeridas:
+    for col in columnas_requeridas:
         if col not in df.columns:
             logger.error(f"❌ Columna '{col}' no encontrada para cálculo")
+            # En lugar de retornar, continuamos pero sin calcular
             return df
     
     # Calcular diferencia en segundos
@@ -245,6 +251,10 @@ def calcular_tiempos_agente_robot(df):
             logger.info(f"    Mínimo: {min_seg:.0f}s ({calcular_tiempo_en_minutos_segundos(min_seg)})")
             logger.info(f"    Máximo: {max_seg:.0f}s ({calcular_tiempo_en_minutos_segundos(max_seg)})")
             logger.info(f"    Promedio: {mean_seg:.0f}s ({calcular_tiempo_en_minutos_segundos(mean_seg)})")
+    else:
+        logger.warning("  ⚠️ No hay filas con ambas fechas válidas para calcular")
+        df["Tiempo de alta robot"] = None
+        df["Tiempo de alta robot segundos"] = None
     
     # =========================
     # 3. RESUMEN FINAL
@@ -268,14 +278,14 @@ def calcular_tiempos_agente_robot(df):
         fila_ejemplo = df[df["Tiempo de captura agente"].notna()].iloc[0]
         logger.info(f"\n  Ejemplo final de cálculos:")
         logger.info(f"    Tiempo de captura agente: {fila_ejemplo['Tiempo de captura agente']}")
-        logger.info(f"    Tiempo de captura agente segundos: {fila_ejemplo['Tiempo de captura agente segundos']}")
+        logger.info(f"    Tiempo de captura agente segundos: {fila_ejemplo['Tiempo de captura agente segundos']:.0f}")
     
     if alta_calculados > 0:
         if captura_calculados == 0:
             fila_ejemplo = df[df["Tiempo de alta robot"].notna()].iloc[0]
             logger.info(f"\n  Ejemplo final de cálculos:")
         logger.info(f"    Tiempo de alta robot: {fila_ejemplo['Tiempo de alta robot']}")
-        logger.info(f"    Tiempo de alta robot segundos: {fila_ejemplo['Tiempo de alta robot segundos']}")
+        logger.info(f"    Tiempo de alta robot segundos: {fila_ejemplo['Tiempo de alta robot segundos']:.0f}")
     
     return df
 
