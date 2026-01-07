@@ -24,7 +24,7 @@ EXCEL_PATH.mkdir(exist_ok=True)
 # Buscar CSV acumulado
 CSV_FILE = next(BASE_PATH.glob("Acumulado_filtrado_*.csv"))
 
-# Locale español solo para el nombre del archivo
+# Locale español para nombre del archivo
 try:
     locale.setlocale(locale.LC_TIME, "Spanish_Spain")
 except:
@@ -34,7 +34,7 @@ except:
         logger.warning("⚠️ No se pudo configurar locale en español")
 
 HOY = datetime.now()
-FECHA_TEXTO = HOY.strftime("%d-%B").capitalize()  # Ej: 7-Enero
+FECHA_TEXTO = HOY.strftime("%d-%B").capitalize()
 OUTPUT_FILE = EXCEL_PATH / f"Reporte_Aclarapp_{FECHA_TEXTO}.xlsx"
 
 # =========================
@@ -71,17 +71,10 @@ COLUMNAS_SALIDA = [
 # FUNCIONES
 # =========================
 def convertir_fecha(df, columna):
-    """
-    Maneja formatos mixtos de fecha:
-    - Fecha / Fecha Enviado / Fecha Asignacion / Fecha Atendido:
-      yyyy-dd-MM HH:mm:ss
-    - Fecha Creacion:
-      dd/MM/yyyy hh:mm:ss AM/PM
-    """
     if columna not in df.columns:
         return
 
-    # Formato: yyyy-dd-MM HH:mm:ss
+    # ---- yyyy-dd-MM HH:mm:ss ----
     if columna in ["Fecha", "Fecha Enviado", "Fecha Asignacion", "Fecha Atendido"]:
         df[columna] = pd.to_datetime(
             df[columna],
@@ -89,7 +82,7 @@ def convertir_fecha(df, columna):
             errors="coerce"
         )
 
-    # Formato: dd/MM/yyyy hh:mm:ss AM/PM
+    # ---- dd/MM/yyyy hh:mm:ss AM/PM → yyyy-dd-MM HH:mm:ss ----
     elif columna == "Fecha Creacion":
         df[columna] = (
             df[columna]
@@ -99,9 +92,18 @@ def convertir_fecha(df, columna):
             .str.replace(r"a\.\s*m\.", "AM", regex=True)
         )
 
+        # Parsear formato original
         df[columna] = pd.to_datetime(
             df[columna],
             format="%d/%m/%Y %I:%M:%S %p",
+            errors="coerce"
+        )
+
+        # Unificar formato
+        df[columna] = df[columna].dt.strftime("%Y-%d-%m %H:%M:%S")
+        df[columna] = pd.to_datetime(
+            df[columna],
+            format="%Y-%d-%m %H:%M:%S",
             errors="coerce"
         )
 
@@ -127,6 +129,18 @@ def main():
     logger.info(f"✓ Filtrado Estatus=True → {len(df)} filas")
 
     # =========================
+    # LIMPIAR CIS / CIS_1 (ANTES DE SELECCIONAR COLUMNAS)
+    # =========================
+    for col in ["CIS", "CIS_1"]:
+        if col in df.columns:
+            df[col] = (
+                df[col]
+                .astype(str)
+                .str.replace(r"\D+", "", regex=True)
+                .replace("", None)
+            )
+
+    # =========================
     # CONVERTIR FECHAS
     # =========================
     columnas_fecha = [
@@ -139,8 +153,7 @@ def main():
 
     for col in columnas_fecha:
         convertir_fecha(df, col)
-        validas = df[col].notna().sum()
-        logger.info(f"📅 {col}: {validas}/{len(df)} fechas válidas")
+        logger.info(f"📅 {col}: {df[col].notna().sum()} válidas")
 
     # =========================
     # CÁLCULO DE TIEMPOS
@@ -161,42 +174,22 @@ def main():
         df["Tiempo de alta robot"] * 60
     )
 
-    # Evitar tiempos negativos
+    # Eliminar tiempos negativos
     df.loc[df["Tiempo de captura agente"] < 0, "Tiempo de captura agente"] = None
     df.loc[df["Tiempo de alta robot"] < 0, "Tiempo de alta robot"] = None
 
     # =========================
-    # LIMPIAR CIS Y CIS_1 (solo números)
-    # =========================
-    for col in ["CIS", "CIS_1"]:
-        if col in df.columns:
-            df[col] = (
-                df[col]
-                .astype(str)
-                .str.replace(r"\D+", "", regex=True)
-                .replace("", None)
-            )
-
-    # =========================
     # OTRAS TRANSFORMACIONES
     # =========================
-    df["Numero de cargos"] = pd.to_numeric(
-        df["Cargos"], errors="coerce"
-    )
-
+    df["Numero de cargos"] = pd.to_numeric(df["Cargos"], errors="coerce")
     df["Estatus"] = "Exitoso"
 
-    df.rename(
-        columns={"NOMBRE": "Nombre Agente"},
-        inplace=True
-    )
+    df.rename(columns={"NOMBRE": "Nombre Agente"}, inplace=True)
 
     # =========================
-    # SELECCIONAR COLUMNAS
+    # SELECCIÓN FINAL
     # =========================
     df_final = df[COLUMNAS_SALIDA].copy()
-
-    # Ordenar por fecha
     df_final.sort_values("Fecha", inplace=True)
 
     # =========================
@@ -211,7 +204,7 @@ def main():
 
     logger.info("✅ Reporte Excel generado correctamente")
     logger.info(f"📊 Filas finales: {len(df_final)}")
-    logger.info(f"📁 Ubicación: {OUTPUT_FILE}")
+    logger.info(f"📁 Ruta: {OUTPUT_FILE}")
 
 # =========================
 # EJECUCIÓN
