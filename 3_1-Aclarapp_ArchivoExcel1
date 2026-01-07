@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 from datetime import datetime
 import numpy as np
+import unicodedata
 
 # =========================
 # LOGGING
@@ -47,6 +48,16 @@ RUTA_EXCEL = EXCEL_FOLDER / NOMBRE_EXCEL
 # =========================
 # FUNCIONES
 # =========================
+def normalizar_texto(texto):
+    """Normaliza texto eliminando acentos y convirtiendo a minúsculas"""
+    if pd.isna(texto):
+        return texto
+    texto = str(texto)
+    # Normalizar unicode y eliminar acentos
+    texto = unicodedata.normalize('NFKD', texto)
+    texto = ''.join([c for c in texto if not unicodedata.combining(c)])
+    return texto.lower().strip()
+
 def limpiar_formato_fecha_especial(valor):
     """
     Limpia formato especial: dd/MM/yyyy hh:mm:ss p. m. (con espacio entre p. y m.)
@@ -103,6 +114,20 @@ def calcular_tiempo_minutos(fecha_inicio, fecha_fin):
     except:
         return np.nan
 
+def encontrar_columna(df, nombres_posibles):
+    """Busca una columna en el dataframe considerando diferentes nombres"""
+    for nombre in nombres_posibles:
+        if nombre in df.columns:
+            return nombre
+    
+    # Si no encuentra directamente, buscar con normalización
+    columnas_normalizadas = {normalizar_texto(col): col for col in df.columns}
+    for nombre_normalizado in [normalizar_texto(n) for n in nombres_posibles]:
+        if nombre_normalizado in columnas_normalizadas:
+            return columnas_normalizadas[nombre_normalizado]
+    
+    return None
+
 # =========================
 # MAIN
 # =========================
@@ -112,7 +137,7 @@ def main():
     logger.info(f"📊 Archivo destino: {NOMBRE_EXCEL}")
     
     # =========================
-    # 1. CARGAR DATOS
+    # 1. CARGAR DATOS Y NORMALIZAR NOMBRES DE COLUMNAS
     # =========================
     logger.info("📥 Cargando datos del CSV...")
     
@@ -126,25 +151,28 @@ def main():
     logger.info(f"  Columnas encontradas: {len(df.columns)}")
     
     # Mostrar todas las columnas para debugging
-    logger.debug(f"  Columnas disponibles: {list(df.columns)}")
+    logger.info("  Columnas disponibles en el CSV:")
+    for col in df.columns:
+        logger.info(f"    - '{col}'")
+    
+    # Normalizar nombres de columnas (eliminar acentos)
+    columnas_originales = df.columns.tolist()
+    df.columns = [normalizar_texto(col) for col in df.columns]
+    logger.info("  Nombres de columnas normalizados (sin acentos)")
     
     # =========================
     # 2. FILTRAR POR STATUS
     # =========================
     logger.info("🔍 Filtrando datos (eliminando Estatus = False)...")
     
-    # Buscar columna Estatus (puede tener diferentes nombres)
-    columna_estatus = None
-    posibles_nombres = ['Estatus', 'estatus', 'ESTATUS', 'Status', 'status']
-    
-    for nombre in posibles_nombres:
-        if nombre in df.columns:
-            columna_estatus = nombre
-            break
+    # Buscar columna Estatus
+    nombres_estatus = ['estatus', 'status', 'estado']
+    columna_estatus = encontrar_columna(df, nombres_estatus)
     
     if columna_estatus:
         filas_antes = len(df)
         df = df[df[columna_estatus] != 'False']
+        df = df[df[columna_estatus] != 'false']
         filas_filtradas = filas_antes - len(df)
         logger.info(f"  Filas eliminadas: {filas_filtradas}")
         logger.info(f"  Filas después de filtrar: {len(df)}")
@@ -152,145 +180,151 @@ def main():
         logger.warning("  Columna 'Estatus' no encontrada, continuando sin filtrar")
     
     # =========================
-    # 3. VERIFICAR Y SELECCIONAR COLUMNAS NECESARIAS
+    # 3. ENCONTRAR Y RENOMBRAR COLUMNAS NECESARIAS
     # =========================
-    logger.info("📋 Verificando columnas necesarias...")
+    logger.info("📋 Buscando columnas necesarias...")
     
-    # Mapeo de nombres posibles para cada columna
-    columnas_mapeo = {
-        'Fecha': ['Fecha', 'fecha', 'FECHA', 'Date', 'date'],
-        'Tipo de tarjeta': ['Tipo de tarjeta', 'Tipo Tarjeta', 'Tipo tarjeta', 'tipo de tarjeta'],
-        'Tipo de aclaracion': ['Tipo de aclaracion', 'Tipo Aclaracion', 'Tipo aclaracion', 'tipo de aclaracion'],
-        'Detalles de aclaracion': ['Detalles de aclaracion', 'Detalles Aclaracion', 'detalles de aclaracion'],
-        'Cargos': ['Cargos', 'cargos', 'CARGO', 'Cargo', 'cargo'],
-        'RobotID': ['RobotID', 'Robot Id', 'robotid', 'ROBOTID'],
-        'AclaracionID': ['AclaracionID', 'Aclaracion Id', 'aclaracionid'],
-        'Estatus': ['Estatus', 'estatus', 'ESTATUS', 'Status', 'status'],
-        'Registro': ['Registro', 'registro', 'REGISTRO', 'Numero de registro'],
-        'Folio': ['Folio', 'folio', 'FOLIO', 'Folio SCC'],
-        'CIS_1': ['CIS_1', 'CIS', 'cis_1', 'cis'],
-        'Fecha Creación': ['Fecha Creación', 'Fecha Creacion', 'Fecha creación', 'fecha creación'],
-        'Fecha Enviado': ['Fecha Enviado', 'Fecha enviado', 'fecha enviado'],
-        'Fecha Asignacion': ['Fecha Asignacion', 'Fecha Asignación', 'fecha asignacion'],
-        'Fecha Atendido': ['Fecha Atendido', 'Fecha atendido', 'fecha atendido'],
-        'NOMBRE': ['NOMBRE', 'Nombre', 'nombre', 'NOMBRE AGENTE', 'Nombre Agente'],
-        'Supervisor': ['Supervisor', 'supervisor', 'SUPERVISOR'],
-        'Site': ['Site', 'site', 'SITE'],
-        'Skill': ['Skill', 'skill', 'SKILL']
+    # Mapeo de nombres normalizados a nombres estándar
+    mapeo_columnas = {
+        'fecha': 'Fecha',
+        'tipo de tarjeta': 'Tipo de tarjeta',
+        'tipo de aclaracion': 'Tipo de aclaracion',
+        'detalles de aclaracion': 'Detalles de aclaracion',
+        'cargos': 'Cargos',
+        'robotid': 'RobotID',
+        'aclaracionid': 'AclaracionID',
+        'estatus': 'Estatus',
+        'registro': 'Registro',
+        'folio': 'Folio',
+        'cis_1': 'CIS_1',
+        'fecha creacion': 'Fecha Creación',
+        'fecha enviado': 'Fecha Enviado',
+        'fecha asignacion': 'Fecha Asignacion',
+        'fecha atendido': 'Fecha Atendido',
+        'nombre': 'Nombre Agente',
+        'supervisor': 'Supervisor',
+        'site': 'Site',
+        'skill': 'Skill'
     }
     
-    # Encontrar los nombres reales de las columnas
-    columnas_reales = {}
-    for col_standard, posibles_nombres in columnas_mapeo.items():
-        for nombre in posibles_nombres:
-            if nombre in df.columns:
-                columnas_reales[col_standard] = nombre
-                break
+    # Buscar columnas en el dataframe
+    columnas_encontradas = {}
+    for col_normalizada, col_estandar in mapeo_columnas.items():
+        if col_normalizada in df.columns:
+            columnas_encontradas[col_estandar] = col_normalizada
+            logger.info(f"  ✓ Encontrada: '{col_normalizada}' -> '{col_estandar}'")
+        else:
+            logger.warning(f"  ✗ No encontrada: '{col_estandar}' (buscada como '{col_normalizada}')")
     
-    # Mostrar qué columnas se encontraron
-    logger.info("  Columnas encontradas:")
-    for col_standard, col_real in columnas_reales.items():
-        logger.info(f"    {col_standard} -> {col_real}")
+    # Verificar especialmente las columnas de fecha
+    columnas_fecha_buscadas = ['Fecha', 'Fecha Enviado', 'Fecha Asignacion', 'Fecha Atendido', 'Fecha Creación']
+    for col_fecha in columnas_fecha_buscadas:
+        nombre_normalizado = normalizar_texto(col_fecha)
+        if nombre_normalizado in df.columns:
+            logger.info(f"  ✅ Columna de fecha '{col_fecha}' encontrada como '{nombre_normalizado}'")
+        else:
+            logger.warning(f"  ❌ Columna de fecha '{col_fecha}' NO encontrada")
     
-    # Columnas no encontradas
-    columnas_no_encontradas = [col for col in columnas_mapeo.keys() if col not in columnas_reales]
-    if columnas_no_encontradas:
-        logger.warning(f"  Columnas no encontradas: {columnas_no_encontradas}")
-    
-    # Renombrar columnas a nombres estándar
-    for col_standard, col_real in columnas_reales.items():
-        if col_real != col_standard:
-            df.rename(columns={col_real: col_standard}, inplace=True)
+    # Renombrar columnas encontradas a nombres estándar
+    for col_estandar, col_original in columnas_encontradas.items():
+        df = df.rename(columns={col_original: col_estandar})
     
     # =========================
     # 4. PROCESAR FECHAS
     # =========================
-    logger.info("⏰ Procesando fechas...")
+    logger.info("\n⏰ Procesando fechas...")
     
     columnas_fecha = ['Fecha', 'Fecha Creación', 'Fecha Enviado', 'Fecha Asignacion', 'Fecha Atendido']
     
     for col in columnas_fecha:
         if col in df.columns:
-            logger.info(f"  Procesando {col}...")
-            # Mostrar ejemplos antes de procesar
-            ejemplos = df[col].dropna().head(3).tolist()
-            for i, ejemplo in enumerate(ejemplos):
-                logger.debug(f"    Ejemplo {i} original: '{ejemplo}'")
+            logger.info(f"  Procesando '{col}'...")
             
+            # Mostrar ejemplos antes de procesar
+            valores_no_nulos = df[col].notna().sum()
+            logger.info(f"    Valores a procesar: {valores_no_nulos}/{len(df)}")
+            
+            if valores_no_nulos > 0:
+                ejemplos = df[col].dropna().head(3).tolist()
+                for i, ejemplo in enumerate(ejemplos):
+                    logger.debug(f"    Ejemplo {i}: '{ejemplo}'")
+            
+            # Procesar fechas
             df[col] = df[col].apply(parsear_fecha)
             
             # Verificar conversión
             nulos = df[col].isna().sum()
-            total = len(df)
-            logger.info(f"    Convertidas: {total - nulos}/{total} ({(total - nulos)/total*100:.1f}%)")
+            convertidas = valores_no_nulos - nulos
+            logger.info(f"    Convertidas: {convertidas}/{valores_no_nulos} ({convertidas/valores_no_nulos*100:.1f}%)")
             
             if nulos > 0 and nulos < 5:
                 ejemplos_no_convertidos = df.loc[df[col].isna(), col].head(3).tolist()
                 logger.warning(f"    Ejemplos no convertidos: {ejemplos_no_convertidos}")
+        else:
+            logger.warning(f"  Columna '{col}' no disponible para procesar")
     
     # =========================
     # 5. CALCULAR TIEMPOS
     # =========================
-    logger.info("⏱️ Calculando tiempos...")
+    logger.info("\n⏱️ Calculando tiempos...")
     
     # Tiempo de captura agente (Fecha Enviado - Fecha Creación) en minutos
     if 'Fecha Enviado' in df.columns and 'Fecha Creación' in df.columns:
+        logger.info("  Calculando Tiempo de captura agente...")
         df['Tiempo de captura agente'] = df.apply(
             lambda row: calcular_tiempo_minutos(row['Fecha Creación'], row['Fecha Enviado']), axis=1
         )
-        logger.info(f"  Tiempo de captura agente calculado")
         
         # Convertir a segundos
         df['Tiempo de captura agente segundos'] = df['Tiempo de captura agente'] * 60
-        logger.info(f"  Tiempo de captura agente segundos calculado")
         
         # Estadísticas
         tiempo_prom_captura = df['Tiempo de captura agente'].mean()
-        logger.info(f"    Tiempo promedio: {tiempo_prom_captura:.2f} minutos")
+        logger.info(f"    ✓ Tiempo promedio: {tiempo_prom_captura:.2f} minutos")
+    else:
+        logger.warning("  ✗ No se pueden calcular tiempos de captura (faltan columnas)")
     
     # Tiempo de alta robot (Fecha - Fecha Asignacion) en minutos
     if 'Fecha' in df.columns and 'Fecha Asignacion' in df.columns:
+        logger.info("  Calculando Tiempo de alta robot...")
         df['Tiempo de alta robot'] = df.apply(
             lambda row: calcular_tiempo_minutos(row['Fecha Asignacion'], row['Fecha']), axis=1
         )
-        logger.info(f"  Tiempo de alta robot calculado")
         
         # Convertir a segundos
         df['Tiempo de alta robot segundos'] = df['Tiempo de alta robot'] * 60
-        logger.info(f"  Tiempo de alta robot segundos calculado")
         
         # Estadísticas
         tiempo_prom_alta = df['Tiempo de alta robot'].mean()
-        logger.info(f"    Tiempo promedio: {tiempo_prom_alta:.2f} minutos")
+        logger.info(f"    ✓ Tiempo promedio: {tiempo_prom_alta:.2f} minutos")
+    else:
+        logger.warning("  ✗ No se pueden calcular tiempos de alta robot (faltan columnas)")
     
-    # Contar número de cargos (suponiendo que es numérico)
+    # Contar número de cargos
     if 'Cargos' in df.columns:
         try:
+            logger.info("  Calculando número de cargos...")
             df['Numero de cargos'] = pd.to_numeric(df['Cargos'], errors='coerce').fillna(0)
-            logger.info(f"  Número de cargos calculado")
+            logger.info(f"    ✓ Cargos calculados: {df['Numero de cargos'].sum():.2f} total")
         except Exception as e:
             df['Numero de cargos'] = 0
-            logger.warning(f"  Error calculando número de cargos: {e}")
+            logger.warning(f"    ✗ Error calculando cargos: {e}")
     
     # =========================
-    # 6. RENOMBRAR COLUMNAS Y VALORES
+    # 6. RENOMBRAR VALORES
     # =========================
-    logger.info("🏷️ Renombrando columnas y valores...")
-    
-    if 'NOMBRE' in df.columns:
-        df = df.rename(columns={'NOMBRE': 'Nombre Agente'})
-        logger.info("  'NOMBRE' renombrado a 'Nombre Agente'")
+    logger.info("\n🏷️ Renombrando valores...")
     
     if 'Estatus' in df.columns:
         filas_antes = df['Estatus'].eq('True').sum()
-        df['Estatus'] = df['Estatus'].replace({'True': 'exitoso'})
+        df['Estatus'] = df['Estatus'].replace({'True': 'exitoso', 'true': 'exitoso', 'TRUE': 'exitoso'})
         filas_despues = df['Estatus'].eq('exitoso').sum()
-        logger.info(f"  'Estatus' actualizado: {filas_antes} 'True' -> {filas_despues} 'exitoso'")
+        logger.info(f"  'Estatus' actualizado: {filas_antes} True -> {filas_despues} exitoso")
     
     # =========================
     # 7. REORDENAR COLUMNAS FINALES
     # =========================
-    logger.info("📊 Estructurando columnas finales...")
+    logger.info("\n📊 Estructurando columnas finales...")
     
     columnas_finales = [
         'Fecha', 'Tipo de tarjeta', 'Tipo de aclaracion', 'Detalles de aclaracion',
@@ -305,24 +339,26 @@ def main():
     columnas_finales_existentes = [col for col in columnas_finales if col in df.columns]
     columnas_faltantes = [col for col in columnas_finales if col not in df.columns]
     
+    logger.info(f"  Columnas disponibles para el reporte: {len(columnas_finales_existentes)}/{len(columnas_finales)}")
+    
     if columnas_faltantes:
-        logger.warning(f"  Columnas faltantes en el resultado: {columnas_faltantes}")
+        logger.warning("  Columnas faltantes:")
+        for col in columnas_faltantes:
+            logger.warning(f"    • {col}")
     
     df = df[columnas_finales_existentes]
     
-    logger.info(f"  Columnas finales: {len(columnas_finales_existentes)}")
+    logger.info("\n  Resumen por columna:")
     for col in columnas_finales_existentes:
         no_nulos = df[col].notna().sum()
-        logger.info(f"    {col}: {no_nulos}/{len(df)} no nulos")
-    
-    logger.info(f"  Filas finales: {len(df)}")
+        porcentaje = no_nulos / len(df) * 100
+        logger.info(f"    {col:<30} {no_nulos:>4}/{len(df):<4} ({porcentaje:>5.1f}%)")
     
     # =========================
     # 8. ELIMINAR ARCHIVOS EXCEL ANTERIORES
     # =========================
-    logger.info("🗑️ Limpiando archivos Excel anteriores...")
+    logger.info("\n🗑️ Limpiando archivos Excel anteriores...")
     
-    # Eliminar archivos de días anteriores (mantener solo el de hoy)
     archivos_eliminados = 0
     for archivo_excel in EXCEL_FOLDER.glob("Reporte_Aclarapp_*.xlsx"):
         if archivo_excel.name != NOMBRE_EXCEL:
@@ -338,25 +374,25 @@ def main():
     # =========================
     # 9. CREAR ARCHIVO EXCEL
     # =========================
-    logger.info(f"💾 Creando archivo Excel: {RUTA_EXCEL}")
+    logger.info(f"\n💾 Creando archivo Excel: {RUTA_EXCEL}")
     
     try:
-        # Crear Excel con pandas (usará openpyxl por defecto)
+        # Crear Excel con pandas
         with pd.ExcelWriter(RUTA_EXCEL, engine='openpyxl') as writer:
             df.to_excel(writer, sheet_name='Reporte', index=False)
             
-            # Ajustar ancho de columnas
+            # Ajustar ancho de columnas automáticamente
             worksheet = writer.sheets['Reporte']
             for column in worksheet.columns:
                 max_length = 0
                 column_letter = column[0].column_letter
                 for cell in column:
                     try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
+                        if cell.value:
+                            max_length = max(max_length, len(str(cell.value)))
                     except:
                         pass
-                adjusted_width = min(max_length + 2, 30)
+                adjusted_width = min(max_length + 2, 50)
                 worksheet.column_dimensions[column_letter].width = adjusted_width
         
         logger.info("✅ Reporte Excel generado exitosamente")
@@ -376,44 +412,45 @@ def main():
     # =========================
     # 10. RESUMEN FINAL
     # =========================
-    logger.info("\n" + "="*60)
+    logger.info("\n" + "="*70)
     logger.info("📋 RESUMEN FINAL DEL REPORTE")
-    logger.info("="*60)
+    logger.info("="*70)
     
     logger.info(f"📈 TOTAL DE REGISTROS: {len(df)}")
     
     if 'Estatus' in df.columns:
         exitosos = df['Estatus'].eq('exitoso').sum()
         otros = len(df) - exitosos
-        logger.info(f"📊 ESTATUS:")
+        logger.info(f"\n📊 ESTATUS:")
         logger.info(f"  • Exitosos: {exitosos} ({exitosos/len(df)*100:.1f}%)")
         logger.info(f"  • Otros: {otros} ({otros/len(df)*100:.1f}%)")
     
     if 'Nombre Agente' in df.columns:
         agentes_unicos = df['Nombre Agente'].nunique()
-        logger.info(f"👥 AGENTES: {agentes_unicos} únicos")
+        logger.info(f"\n👥 AGENTES: {agentes_unicos} únicos")
     
     if 'Tiempo de captura agente' in df.columns:
         tiempo_prom_captura = df['Tiempo de captura agente'].mean()
         tiempo_max_captura = df['Tiempo de captura agente'].max()
-        logger.info(f"⏱️ TIEMPO CAPTURA AGENTE:")
+        logger.info(f"\n⏱️ TIEMPO CAPTURA AGENTE:")
         logger.info(f"  • Promedio: {tiempo_prom_captura:.2f} minutos")
         logger.info(f"  • Máximo: {tiempo_max_captura:.2f} minutos")
     
     if 'Tiempo de alta robot' in df.columns:
         tiempo_prom_alta = df['Tiempo de alta robot'].mean()
         tiempo_max_alta = df['Tiempo de alta robot'].max()
-        logger.info(f"🤖 TIEMPO ALTA ROBOT:")
+        logger.info(f"\n🤖 TIEMPO ALTA ROBOT:")
         logger.info(f"  • Promedio: {tiempo_prom_alta:.2f} minutos")
         logger.info(f"  • Máximo: {tiempo_max_alta:.2f} minutos")
     
     if 'Tipo de aclaracion' in df.columns:
         tipos_unicos = df['Tipo de aclaracion'].nunique()
-        logger.info(f"📝 TIPOS DE ACLARACIÓN: {tipos_unicos} diferentes")
+        logger.info(f"\n📝 TIPOS DE ACLARACIÓN: {tipos_unicos} diferentes")
     
-    logger.info("="*60)
+    logger.info("\n" + "="*70)
     logger.info(f"✅ PROCESO COMPLETADO")
     logger.info(f"📁 Archivo guardado en: {RUTA_EXCEL}")
+    logger.info("="*70)
 
 # =========================
 # EJECUCIÓN
