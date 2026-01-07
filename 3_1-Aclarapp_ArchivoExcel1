@@ -2,12 +2,8 @@ import pandas as pd
 import logging
 from pathlib import Path
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 import numpy as np
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Border, Side, Alignment, NamedStyle
-from openpyxl.chart import BarChart, PieChart, Reference, Series
-from openpyxl.utils import get_column_letter
 
 # =========================
 # LOGGING
@@ -68,6 +64,9 @@ def limpiar_formato_fecha_especial(valor):
     valor_str = re.sub(r'p\.\s*m\.', 'PM', valor_str, flags=re.IGNORECASE)
     valor_str = re.sub(r'a\.\s*m\.', 'AM', valor_str, flags=re.IGNORECASE)
     
+    # También manejar casos con puntos en el tiempo
+    valor_str = re.sub(r'(\d{1,2})\.(\d{1,2})\.(\d{1,2})', r'\1:\2:\3', valor_str)
+    
     return valor_str.strip()
 
 def parsear_fecha(fecha_str):
@@ -78,11 +77,17 @@ def parsear_fecha(fecha_str):
     # Limpiar formato especial
     fecha_limpia = limpiar_formato_fecha_especial(fecha_str)
     
-    # Intentar parsear
+    # Intentar parsear con diferentes formatos
     try:
+        # Formato con AM/PM
         return pd.to_datetime(fecha_limpia, format="%d/%m/%Y %I:%M:%S %p", errors='coerce')
     except:
-        return pd.to_datetime(fecha_limpia, dayfirst=True, errors='coerce')
+        try:
+            # Formato 24h
+            return pd.to_datetime(fecha_limpia, format="%d/%m/%Y %H:%M:%S", errors='coerce')
+        except:
+            # Parseo automático
+            return pd.to_datetime(fecha_limpia, dayfirst=True, errors='coerce')
 
 def calcular_tiempo_minutos(fecha_inicio, fecha_fin):
     """Calcula diferencia en minutos entre dos fechas"""
@@ -91,216 +96,12 @@ def calcular_tiempo_minutos(fecha_inicio, fecha_fin):
     
     try:
         diferencia = fecha_fin - fecha_inicio
+        # Si la diferencia es negativa, retornar NaN
+        if diferencia.total_seconds() < 0:
+            return np.nan
         return diferencia.total_seconds() / 60  # Convertir a minutos
     except:
         return np.nan
-
-def aplicar_formato_excel(wb, ws, df):
-    """Aplica formato a la hoja de Excel usando openpyxl"""
-    
-    # Definir estilos
-    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF")
-    border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    center_alignment = Alignment(horizontal="center", vertical="center")
-    
-    # Aplicar formato a encabezados
-    for col_num, column_name in enumerate(df.columns, 1):
-        cell = ws.cell(row=1, column=col_num, value=column_name)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.border = border
-        cell.alignment = center_alignment
-        
-        # Ajustar ancho de columna
-        max_length = max(df[column_name].astype(str).apply(len).max(), len(column_name))
-        ws.column_dimensions[get_column_letter(col_num)].width = min(max_length + 2, 30)
-    
-    # Aplicar formato a datos
-    for row in range(2, len(df) + 2):
-        for col_num, column_name in enumerate(df.columns, 1):
-            cell = ws.cell(row=row, column=col_num)
-            cell_value = df.iat[row-2, col_num-1]
-            
-            # Aplicar bordes y alineación
-            cell.border = border
-            cell.alignment = center_alignment
-            
-            # Asignar valor
-            if pd.isna(cell_value):
-                cell.value = None
-            elif 'Fecha' in column_name:
-                if isinstance(cell_value, (pd.Timestamp, datetime)):
-                    cell.value = cell_value
-                    cell.number_format = 'DD/MM/YYYY HH:MM:SS'
-                else:
-                    cell.value = cell_value
-            elif 'Tiempo' in column_name and 'segundos' not in column_name.lower():
-                if pd.notna(cell_value):
-                    cell.value = cell_value
-                    # Formato de tiempo en minutos
-                    cell.number_format = '0.00 "min"'
-            elif 'segundos' in column_name.lower():
-                if pd.notna(cell_value):
-                    cell.value = cell_value
-                    cell.number_format = '#,##0'
-            else:
-                cell.value = cell_value
-
-def crear_graficas_openpyxl(wb, df):
-    """Crea gráficas usando openpyxl"""
-    
-    # =========================
-    # HOJA: Resumen General
-    # =========================
-    ws_resumen = wb.create_sheet(title="Resumen General")
-    
-    # Títulos
-    ws_resumen['A1'] = "ESTADÍSTICAS DEL REPORTE"
-    ws_resumen['A1'].font = Font(bold=True, size=14)
-    
-    # Estadísticas básicas
-    stats = [
-        ['Total de registros', len(df)],
-        ['Registros exitosos', df['Estatus'].eq('exitoso').sum()],
-        ['Agentes involucrados', df['Nombre Agente'].nunique()],
-        ['Tipos de aclaración', df['Tipo de aclaracion'].nunique()],
-        ['Tiempo promedio captura (min)', f"{df['Tiempo de captura agente'].mean():.2f}"],
-        ['Tiempo promedio alta robot (min)', f"{df['Tiempo de alta robot'].mean():.2f}"]
-    ]
-    
-    if 'Cargos' in df.columns and df['Cargos'].notna().any():
-        try:
-            cargos_totales = pd.to_numeric(df['Cargos'], errors='coerce').sum()
-            stats.append(['Cargos totales', f"{cargos_totales:,.2f}"])
-        except:
-            pass
-    
-    # Escribir estadísticas
-    for i, (label, value) in enumerate(stats, start=3):
-        ws_resumen[f'A{i}'] = label
-        ws_resumen[f'B{i}'] = value
-        ws_resumen[f'A{i}'].font = Font(bold=True)
-    
-    # =========================
-    # HOJA: Gráficas
-    # =========================
-    ws_graficas = wb.create_sheet(title="Gráficas")
-    
-    # Gráfica 1 - Aclaraciones por Agente (Top 10)
-    ws_graficas['A1'] = "TOP 10 AGENTES POR ACLARACIONES"
-    ws_graficas['A1'].font = Font(bold=True, size=12)
-    
-    aclaraciones_por_agente = df['Nombre Agente'].value_counts().head(10)
-    
-    ws_graficas['A3'] = 'Agente'
-    ws_graficas['B3'] = 'Cantidad de Aclaraciones'
-    ws_graficas['A3'].font = Font(bold=True)
-    ws_graficas['B3'].font = Font(bold=True)
-    
-    for i, (agente, cantidad) in enumerate(aclaraciones_por_agente.items(), start=4):
-        ws_graficas[f'A{i}'] = agente
-        ws_graficas[f'B{i}'] = cantidad
-    
-    # Crear gráfica de barras
-    chart1 = BarChart()
-    chart1.type = "col"
-    chart1.style = 10
-    chart1.title = "Top 10 Agentes por Aclaraciones"
-    chart1.y_axis.title = "Cantidad de Aclaraciones"
-    chart1.x_axis.title = "Agente"
-    
-    data = Reference(ws_graficas, min_col=2, min_row=3, max_row=3+len(aclaraciones_por_agente))
-    cats = Reference(ws_graficas, min_col=1, min_row=4, max_row=3+len(aclaraciones_por_agente))
-    
-    chart1.add_data(data, titles_from_data=True)
-    chart1.set_categories(cats)
-    chart1.shape = 4
-    
-    ws_graficas.add_chart(chart1, "D3")
-    
-    # Gráfica 2 - Tipos de Aclaración
-    start_row = len(aclaraciones_por_agente) + 8
-    ws_graficas[f'A{start_row}'] = "DISTRIBUCIÓN POR TIPO DE ACLARACIÓN"
-    ws_graficas[f'A{start_row}'].font = Font(bold=True, size=12)
-    
-    tipos_aclaracion = df['Tipo de aclaracion'].value_counts()
-    
-    ws_graficas[f'A{start_row+2}'] = 'Tipo de Aclaración'
-    ws_graficas[f'B{start_row+2}'] = 'Cantidad'
-    ws_graficas[f'A{start_row+2}'].font = Font(bold=True)
-    ws_graficas[f'B{start_row+2}'].font = Font(bold=True)
-    
-    for i, (tipo, cantidad) in enumerate(tipos_aclaracion.items(), start=1):
-        ws_graficas[f'A{start_row+2+i}'] = tipo
-        ws_graficas[f'B{start_row+2+i}'] = cantidad
-    
-    # Crear gráfica de pastel
-    chart2 = PieChart()
-    chart2.title = "Distribución por Tipo de Aclaración"
-    
-    data2 = Reference(ws_graficas, min_col=2, min_row=start_row+2, 
-                     max_row=start_row+2+len(tipos_aclaracion))
-    labels = Reference(ws_graficas, min_col=1, min_row=start_row+3, 
-                      max_row=start_row+2+len(tipos_aclaracion))
-    
-    chart2.add_data(data2, titles_from_data=True)
-    chart2.set_categories(labels)
-    
-    ws_graficas.add_chart(chart2, f"D{start_row+2}")
-    
-    # Gráfica 3 - Tiempos Promedio por Agente
-    start_row3 = start_row + len(tipos_aclaracion) + 8
-    ws_graficas[f'A{start_row3}'] = "TIEMPOS PROMEDIO POR AGENTE (TOP 10)"
-    ws_graficas[f'A{start_row3}'].font = Font(bold=True, size=12)
-    
-    tiempos_por_agente = df.groupby('Nombre Agente').agg({
-        'Tiempo de captura agente': 'mean',
-        'Tiempo de alta robot': 'mean'
-    }).head(10)
-    
-    ws_graficas[f'A{start_row3+2}'] = 'Agente'
-    ws_graficas[f'B{start_row3+2}'] = 'Tiempo Captura Prom (min)'
-    ws_graficas[f'C{start_row3+2}'] = 'Tiempo Alta Robot Prom (min)'
-    
-    ws_graficas[f'A{start_row3+2}'].font = Font(bold=True)
-    ws_graficas[f'B{start_row3+2}'].font = Font(bold=True)
-    ws_graficas[f'C{start_row3+2}'].font = Font(bold=True)
-    
-    for i, (agente, row) in enumerate(tiempos_por_agente.iterrows(), start=1):
-        ws_graficas[f'A{start_row3+2+i}'] = agente
-        ws_graficas[f'B{start_row3+2+i}'] = row['Tiempo de captura agente']
-        ws_graficas[f'C{start_row3+2+i}'] = row['Tiempo de alta robot']
-    
-    # Crear gráfica de barras agrupadas
-    chart3 = BarChart()
-    chart3.type = "col"
-    chart3.style = 10
-    chart3.title = "Tiempos Promedio por Agente"
-    chart3.y_axis.title = "Minutos"
-    chart3.x_axis.title = "Agente"
-    chart3.grouping = "clustered"
-    
-    data_captura = Reference(ws_graficas, min_col=2, min_row=start_row3+2, 
-                           max_row=start_row3+2+len(tiempos_por_agente))
-    data_alta = Reference(ws_graficas, min_col=3, min_row=start_row3+2, 
-                         max_row=start_row3+2+len(tiempos_por_agente))
-    cats3 = Reference(ws_graficas, min_col=1, min_row=start_row3+3, 
-                     max_row=start_row3+2+len(tiempos_por_agente))
-    
-    series1 = Series(data_captura, title="Tiempo Captura")
-    series2 = Series(data_alta, title="Tiempo Alta Robot")
-    
-    chart3.series.append(series1)
-    chart3.series.append(series2)
-    chart3.set_categories(cats3)
-    
-    ws_graficas.add_chart(chart3, f"E{start_row3+2}")
 
 # =========================
 # MAIN
@@ -314,40 +115,92 @@ def main():
     # 1. CARGAR DATOS
     # =========================
     logger.info("📥 Cargando datos del CSV...")
-    df = pd.read_csv(ARCHIVO_CSV, dtype=str, encoding='utf-8-sig')
+    
+    try:
+        df = pd.read_csv(ARCHIVO_CSV, dtype=str, encoding='utf-8-sig')
+    except Exception as e:
+        logger.error(f"Error al cargar CSV: {e}")
+        return
     
     logger.info(f"  Filas originales: {len(df)}")
+    logger.info(f"  Columnas encontradas: {len(df.columns)}")
+    
+    # Mostrar todas las columnas para debugging
+    logger.debug(f"  Columnas disponibles: {list(df.columns)}")
     
     # =========================
     # 2. FILTRAR POR STATUS
     # =========================
     logger.info("🔍 Filtrando datos (eliminando Estatus = False)...")
-    if 'Estatus' in df.columns:
-        df = df[df['Estatus'] != 'False']
+    
+    # Buscar columna Estatus (puede tener diferentes nombres)
+    columna_estatus = None
+    posibles_nombres = ['Estatus', 'estatus', 'ESTATUS', 'Status', 'status']
+    
+    for nombre in posibles_nombres:
+        if nombre in df.columns:
+            columna_estatus = nombre
+            break
+    
+    if columna_estatus:
+        filas_antes = len(df)
+        df = df[df[columna_estatus] != 'False']
+        filas_filtradas = filas_antes - len(df)
+        logger.info(f"  Filas eliminadas: {filas_filtradas}")
         logger.info(f"  Filas después de filtrar: {len(df)}")
     else:
         logger.warning("  Columna 'Estatus' no encontrada, continuando sin filtrar")
     
     # =========================
-    # 3. SELECCIONAR Y RENOMBRAR COLUMNAS
+    # 3. VERIFICAR Y SELECCIONAR COLUMNAS NECESARIAS
     # =========================
-    logger.info("📋 Seleccionando y renombrando columnas...")
+    logger.info("📋 Verificando columnas necesarias...")
     
-    columnas_necesarias = [
-        'Fecha', 'Tipo de tarjeta', 'Tipo de aclaracion', 'Detalles de aclaracion',
-        'Cargos', 'RobotID', 'AclaracionID', 'Estatus', 'Registro', 'Folio',
-        'CIS_1', 'Fecha Creación', 'Fecha Enviado', 'Fecha Asignacion', 'Fecha Atendido',
-        'NOMBRE', 'Supervisor', 'Site', 'Skill'
-    ]
+    # Mapeo de nombres posibles para cada columna
+    columnas_mapeo = {
+        'Fecha': ['Fecha', 'fecha', 'FECHA', 'Date', 'date'],
+        'Tipo de tarjeta': ['Tipo de tarjeta', 'Tipo Tarjeta', 'Tipo tarjeta', 'tipo de tarjeta'],
+        'Tipo de aclaracion': ['Tipo de aclaracion', 'Tipo Aclaracion', 'Tipo aclaracion', 'tipo de aclaracion'],
+        'Detalles de aclaracion': ['Detalles de aclaracion', 'Detalles Aclaracion', 'detalles de aclaracion'],
+        'Cargos': ['Cargos', 'cargos', 'CARGO', 'Cargo', 'cargo'],
+        'RobotID': ['RobotID', 'Robot Id', 'robotid', 'ROBOTID'],
+        'AclaracionID': ['AclaracionID', 'Aclaracion Id', 'aclaracionid'],
+        'Estatus': ['Estatus', 'estatus', 'ESTATUS', 'Status', 'status'],
+        'Registro': ['Registro', 'registro', 'REGISTRO', 'Numero de registro'],
+        'Folio': ['Folio', 'folio', 'FOLIO', 'Folio SCC'],
+        'CIS_1': ['CIS_1', 'CIS', 'cis_1', 'cis'],
+        'Fecha Creación': ['Fecha Creación', 'Fecha Creacion', 'Fecha creación', 'fecha creación'],
+        'Fecha Enviado': ['Fecha Enviado', 'Fecha enviado', 'fecha enviado'],
+        'Fecha Asignacion': ['Fecha Asignacion', 'Fecha Asignación', 'fecha asignacion'],
+        'Fecha Atendido': ['Fecha Atendido', 'Fecha atendido', 'fecha atendido'],
+        'NOMBRE': ['NOMBRE', 'Nombre', 'nombre', 'NOMBRE AGENTE', 'Nombre Agente'],
+        'Supervisor': ['Supervisor', 'supervisor', 'SUPERVISOR'],
+        'Site': ['Site', 'site', 'SITE'],
+        'Skill': ['Skill', 'skill', 'SKILL']
+    }
     
-    # Verificar qué columnas están disponibles
-    columnas_disponibles = [col for col in columnas_necesarias if col in df.columns]
-    columnas_faltantes = [col for col in columnas_necesarias if col not in df.columns]
+    # Encontrar los nombres reales de las columnas
+    columnas_reales = {}
+    for col_standard, posibles_nombres in columnas_mapeo.items():
+        for nombre in posibles_nombres:
+            if nombre in df.columns:
+                columnas_reales[col_standard] = nombre
+                break
     
-    if columnas_faltantes:
-        logger.warning(f"  Columnas faltantes: {columnas_faltantes}")
+    # Mostrar qué columnas se encontraron
+    logger.info("  Columnas encontradas:")
+    for col_standard, col_real in columnas_reales.items():
+        logger.info(f"    {col_standard} -> {col_real}")
     
-    df = df[columnas_disponibles].copy()
+    # Columnas no encontradas
+    columnas_no_encontradas = [col for col in columnas_mapeo.keys() if col not in columnas_reales]
+    if columnas_no_encontradas:
+        logger.warning(f"  Columnas no encontradas: {columnas_no_encontradas}")
+    
+    # Renombrar columnas a nombres estándar
+    for col_standard, col_real in columnas_reales.items():
+        if col_real != col_standard:
+            df.rename(columns={col_real: col_standard}, inplace=True)
     
     # =========================
     # 4. PROCESAR FECHAS
@@ -359,7 +212,21 @@ def main():
     for col in columnas_fecha:
         if col in df.columns:
             logger.info(f"  Procesando {col}...")
+            # Mostrar ejemplos antes de procesar
+            ejemplos = df[col].dropna().head(3).tolist()
+            for i, ejemplo in enumerate(ejemplos):
+                logger.debug(f"    Ejemplo {i} original: '{ejemplo}'")
+            
             df[col] = df[col].apply(parsear_fecha)
+            
+            # Verificar conversión
+            nulos = df[col].isna().sum()
+            total = len(df)
+            logger.info(f"    Convertidas: {total - nulos}/{total} ({(total - nulos)/total*100:.1f}%)")
+            
+            if nulos > 0 and nulos < 5:
+                ejemplos_no_convertidos = df.loc[df[col].isna(), col].head(3).tolist()
+                logger.warning(f"    Ejemplos no convertidos: {ejemplos_no_convertidos}")
     
     # =========================
     # 5. CALCULAR TIEMPOS
@@ -372,6 +239,14 @@ def main():
             lambda row: calcular_tiempo_minutos(row['Fecha Creación'], row['Fecha Enviado']), axis=1
         )
         logger.info(f"  Tiempo de captura agente calculado")
+        
+        # Convertir a segundos
+        df['Tiempo de captura agente segundos'] = df['Tiempo de captura agente'] * 60
+        logger.info(f"  Tiempo de captura agente segundos calculado")
+        
+        # Estadísticas
+        tiempo_prom_captura = df['Tiempo de captura agente'].mean()
+        logger.info(f"    Tiempo promedio: {tiempo_prom_captura:.2f} minutos")
     
     # Tiempo de alta robot (Fecha - Fecha Asignacion) en minutos
     if 'Fecha' in df.columns and 'Fecha Asignacion' in df.columns:
@@ -379,34 +254,38 @@ def main():
             lambda row: calcular_tiempo_minutos(row['Fecha Asignacion'], row['Fecha']), axis=1
         )
         logger.info(f"  Tiempo de alta robot calculado")
-    
-    # Convertir a segundos
-    if 'Tiempo de captura agente' in df.columns:
-        df['Tiempo de captura agente segundos'] = df['Tiempo de captura agente'] * 60
-    
-    if 'Tiempo de alta robot' in df.columns:
+        
+        # Convertir a segundos
         df['Tiempo de alta robot segundos'] = df['Tiempo de alta robot'] * 60
+        logger.info(f"  Tiempo de alta robot segundos calculado")
+        
+        # Estadísticas
+        tiempo_prom_alta = df['Tiempo de alta robot'].mean()
+        logger.info(f"    Tiempo promedio: {tiempo_prom_alta:.2f} minutos")
     
     # Contar número de cargos (suponiendo que es numérico)
     if 'Cargos' in df.columns:
         try:
             df['Numero de cargos'] = pd.to_numeric(df['Cargos'], errors='coerce').fillna(0)
-        except:
+            logger.info(f"  Número de cargos calculado")
+        except Exception as e:
             df['Numero de cargos'] = 0
-        logger.info(f"  Número de cargos calculado")
+            logger.warning(f"  Error calculando número de cargos: {e}")
     
     # =========================
-    # 6. RENOMBRAR COLUMNAS
+    # 6. RENOMBRAR COLUMNAS Y VALORES
     # =========================
-    logger.info("🏷️ Renombrando columnas...")
+    logger.info("🏷️ Renombrando columnas y valores...")
     
     if 'NOMBRE' in df.columns:
         df = df.rename(columns={'NOMBRE': 'Nombre Agente'})
         logger.info("  'NOMBRE' renombrado a 'Nombre Agente'")
     
     if 'Estatus' in df.columns:
+        filas_antes = df['Estatus'].eq('True').sum()
         df['Estatus'] = df['Estatus'].replace({'True': 'exitoso'})
-        logger.info("  'Estatus' actualizado (True -> exitoso)")
+        filas_despues = df['Estatus'].eq('exitoso').sum()
+        logger.info(f"  'Estatus' actualizado: {filas_antes} 'True' -> {filas_despues} 'exitoso'")
     
     # =========================
     # 7. REORDENAR COLUMNAS FINALES
@@ -424,9 +303,18 @@ def main():
     
     # Solo mantener columnas que existen
     columnas_finales_existentes = [col for col in columnas_finales if col in df.columns]
+    columnas_faltantes = [col for col in columnas_finales if col not in df.columns]
+    
+    if columnas_faltantes:
+        logger.warning(f"  Columnas faltantes en el resultado: {columnas_faltantes}")
+    
     df = df[columnas_finales_existentes]
     
-    logger.info(f"  Columnas finales: {columnas_finales_existentes}")
+    logger.info(f"  Columnas finales: {len(columnas_finales_existentes)}")
+    for col in columnas_finales_existentes:
+        no_nulos = df[col].notna().sum()
+        logger.info(f"    {col}: {no_nulos}/{len(df)} no nulos")
+    
     logger.info(f"  Filas finales: {len(df)}")
     
     # =========================
@@ -435,73 +323,97 @@ def main():
     logger.info("🗑️ Limpiando archivos Excel anteriores...")
     
     # Eliminar archivos de días anteriores (mantener solo el de hoy)
+    archivos_eliminados = 0
     for archivo_excel in EXCEL_FOLDER.glob("Reporte_Aclarapp_*.xlsx"):
         if archivo_excel.name != NOMBRE_EXCEL:
             try:
                 archivo_excel.unlink()
                 logger.info(f"  Eliminado: {archivo_excel.name}")
+                archivos_eliminados += 1
             except Exception as e:
                 logger.warning(f"  No se pudo eliminar {archivo_excel.name}: {e}")
     
+    logger.info(f"  Total archivos eliminados: {archivos_eliminados}")
+    
     # =========================
-    # 9. CREAR ARCHIVO EXCEL CON OPENPYXL
+    # 9. CREAR ARCHIVO EXCEL
     # =========================
     logger.info(f"💾 Creando archivo Excel: {RUTA_EXCEL}")
     
-    # Crear workbook
-    wb = Workbook()
-    
-    # Crear hoja de datos
-    ws_datos = wb.active
-    ws_datos.title = "Datos"
-    
-    # Escribir datos en la hoja
-    for r_idx, row in enumerate(df.itertuples(index=False), start=1):
-        for c_idx, value in enumerate(row, start=1):
-            ws_datos.cell(row=r_idx, column=c_idx, value=value)
-    
-    # Escribir encabezados
-    for c_idx, column_name in enumerate(df.columns, start=1):
-        ws_datos.cell(row=1, column=c_idx, value=column_name)
-    
-    # Aplicar formato
-    aplicar_formato_excel(wb, ws_datos, df)
-    logger.info("  ✅ Hoja 'Datos' creada con formato")
-    
-    # Crear gráficas
-    crear_graficas_openpyxl(wb, df)
-    logger.info("  ✅ Gráficas creadas")
-    
-    # Guardar archivo
-    wb.save(RUTA_EXCEL)
-    
-    logger.info("✅ Reporte Excel generado exitosamente")
-    logger.info(f"📄 Archivo: {RUTA_EXCEL}")
-    logger.info(f"📊 Total registros en reporte: {len(df)}")
+    try:
+        # Crear Excel con pandas (usará openpyxl por defecto)
+        with pd.ExcelWriter(RUTA_EXCEL, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Reporte', index=False)
+            
+            # Ajustar ancho de columnas
+            worksheet = writer.sheets['Reporte']
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 30)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+        
+        logger.info("✅ Reporte Excel generado exitosamente")
+        logger.info(f"📄 Archivo: {RUTA_EXCEL}")
+        logger.info(f"📊 Total registros en reporte: {len(df)}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error al crear Excel: {e}")
+        # Intentar con formato más simple
+        try:
+            df.to_excel(RUTA_EXCEL, index=False)
+            logger.info("✅ Reporte creado con formato básico")
+        except Exception as e2:
+            logger.error(f"❌ Error crítico al crear Excel: {e2}")
+            return
     
     # =========================
     # 10. RESUMEN FINAL
     # =========================
-    logger.info("\n" + "="*50)
+    logger.info("\n" + "="*60)
     logger.info("📋 RESUMEN FINAL DEL REPORTE")
-    logger.info("="*50)
+    logger.info("="*60)
+    
+    logger.info(f"📈 TOTAL DE REGISTROS: {len(df)}")
     
     if 'Estatus' in df.columns:
         exitosos = df['Estatus'].eq('exitoso').sum()
-        logger.info(f"Registros exitosos: {exitosos}/{len(df)}")
+        otros = len(df) - exitosos
+        logger.info(f"📊 ESTATUS:")
+        logger.info(f"  • Exitosos: {exitosos} ({exitosos/len(df)*100:.1f}%)")
+        logger.info(f"  • Otros: {otros} ({otros/len(df)*100:.1f}%)")
     
     if 'Nombre Agente' in df.columns:
-        logger.info(f"Agentes únicos: {df['Nombre Agente'].nunique()}")
+        agentes_unicos = df['Nombre Agente'].nunique()
+        logger.info(f"👥 AGENTES: {agentes_unicos} únicos")
     
     if 'Tiempo de captura agente' in df.columns:
         tiempo_prom_captura = df['Tiempo de captura agente'].mean()
-        logger.info(f"Tiempo promedio de captura: {tiempo_prom_captura:.2f} minutos")
+        tiempo_max_captura = df['Tiempo de captura agente'].max()
+        logger.info(f"⏱️ TIEMPO CAPTURA AGENTE:")
+        logger.info(f"  • Promedio: {tiempo_prom_captura:.2f} minutos")
+        logger.info(f"  • Máximo: {tiempo_max_captura:.2f} minutos")
     
     if 'Tiempo de alta robot' in df.columns:
         tiempo_prom_alta = df['Tiempo de alta robot'].mean()
-        logger.info(f"Tiempo promedio de alta robot: {tiempo_prom_alta:.2f} minutos")
+        tiempo_max_alta = df['Tiempo de alta robot'].max()
+        logger.info(f"🤖 TIEMPO ALTA ROBOT:")
+        logger.info(f"  • Promedio: {tiempo_prom_alta:.2f} minutos")
+        logger.info(f"  • Máximo: {tiempo_max_alta:.2f} minutos")
     
-    logger.info("="*50)
+    if 'Tipo de aclaracion' in df.columns:
+        tipos_unicos = df['Tipo de aclaracion'].nunique()
+        logger.info(f"📝 TIPOS DE ACLARACIÓN: {tipos_unicos} diferentes")
+    
+    logger.info("="*60)
+    logger.info(f"✅ PROCESO COMPLETADO")
+    logger.info(f"📁 Archivo guardado en: {RUTA_EXCEL}")
 
 # =========================
 # EJECUCIÓN
