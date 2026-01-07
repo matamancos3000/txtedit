@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import locale
 import re
+import numpy as np
 
 # =========================
 # LOGGING
@@ -59,7 +60,10 @@ COLUMNAS_SALIDA = [
     "Tiempo de alta robot",
     "Tiempo de captura agente segundos",
     "Tiempo de alta robot segundos",
+    "Categoria tiempo agente",
+    "Categoria tiempo Alta robot",
     "Numero de cargos",
+    "Categoria de cargos",
     "Nombre Agente",
     "Supervisor",
     "Site",
@@ -118,6 +122,86 @@ def calcular_tiempo_en_minutos_segundos(segundos_totales):
     
     return f"{minutos:02d}:{segundos:02d}"
 
+def categorizar_tiempo_agente(segundos):
+    """
+    Categoriza el tiempo de captura agente según los intervalos especificados
+    """
+    if pd.isna(segundos) or segundos < 0:
+        return None
+    
+    if segundos < 60:
+        return "menos de 1 minuto"
+    elif segundos <= 90:
+        return "menos de 1m 30s"
+    elif segundos <= 180:
+        return "de 1m 30s a 3m"
+    elif segundos <= 300:
+        return "de 3m a 5m"
+    elif segundos <= 600:
+        return "de 5m a 10m"
+    else:  # > 600
+        return "mayor a 10 minutos"
+
+def categorizar_tiempo_alta_robot(segundos):
+    """
+    Categoriza el tiempo de alta robot según los intervalos especificados
+    """
+    if pd.isna(segundos) or segundos < 0:
+        return None
+    
+    if segundos < 60:
+        return "menos de 1m"
+    elif segundos <= 90:
+        return "de 1m a 1m 30s"
+    elif segundos <= 180:
+        return "de 1m 30s a 3m"
+    elif segundos <= 300:
+        return "de 3m a 5m"
+    elif segundos <= 600:
+        return "de 5m a 10m"
+    elif segundos <= 900:
+        return "de 10m a 15m"
+    elif segundos <= 1200:
+        return "de 15m a 20m"
+    else:  # > 1200
+        return "mayor a 20m"
+
+def categorizar_numero_cargos(num_cargos):
+    """
+    Categoriza el número de cargos según los intervalos especificados
+    """
+    if pd.isna(num_cargos) or num_cargos <= 0:
+        return None
+    
+    num_cargos_int = int(num_cargos)
+    
+    if num_cargos_int == 1:
+        return "1 cargo"
+    elif 2 <= num_cargos_int <= 5:
+        return "2 a 5 cargos"
+    elif 6 <= num_cargos_int <= 10:
+        return "6 a 10 cargos"
+    elif 11 <= num_cargos_int <= 20:
+        return "11 a 20 cargos"
+    elif 21 <= num_cargos_int <= 30:
+        return "21 a 30 cargos"
+    elif 31 <= num_cargos_int <= 40:
+        return "31 a 40 cargos"
+    elif 41 <= num_cargos_int <= 50:
+        return "41 a 50 cargos"
+    elif 51 <= num_cargos_int <= 60:
+        return "51 a 60 cargos"
+    elif 61 <= num_cargos_int <= 70:
+        return "61 a 70 cargos"
+    elif 71 <= num_cargos_int <= 80:
+        return "71 a 80 cargos"
+    elif 81 <= num_cargos_int <= 90:
+        return "81 a 90 cargos"
+    elif 91 <= num_cargos_int <= 100:
+        return "91 a 100 cargos"
+    else:  # > 100
+        return "más de 100 cargos"
+
 def calcular_tiempos_agente_robot(df):
     """
     Calcula los tiempos de captura agente y alta robot
@@ -134,7 +218,6 @@ def calcular_tiempos_agente_robot(df):
     for col in columnas_requeridas:
         if col not in df.columns:
             logger.error(f"❌ Columna '{col}' no encontrada para cálculo")
-            # En lugar de retornar, continuamos pero sin calcular
             return df
     
     # Calcular diferencia en segundos
@@ -155,25 +238,30 @@ def calcular_tiempos_agente_robot(df):
             mask_fechas_validas, "Tiempo de captura agente segundos"
         ].apply(calcular_tiempo_en_minutos_segundos)
         
+        # Categorizar tiempo agente
+        df.loc[mask_fechas_validas, "Categoria tiempo agente"] = df.loc[
+            mask_fechas_validas, "Tiempo de captura agente segundos"
+        ].apply(categorizar_tiempo_agente)
+        
         # Estadísticas
         segundos_no_nulos = df["Tiempo de captura agente segundos"].notna().sum()
         logger.info(f"  Tiempos calculados: {segundos_no_nulos}")
         
         if segundos_no_nulos > 0:
-            # Mostrar algunos ejemplos
-            ejemplos_idx = df[mask_fechas_validas].index[:3]
-            for idx in ejemplos_idx:
-                fecha_creacion = df.loc[idx, "Fecha Creacion"]
-                fecha_enviado = df.loc[idx, "Fecha Enviado"]
-                segundos = df.loc[idx, "Tiempo de captura agente segundos"]
-                formato_mmss = df.loc[idx, "Tiempo de captura agente"]
-                
-                logger.info(f"    Ejemplo:")
-                logger.info(f"      Fecha Creacion: {fecha_creacion}")
-                logger.info(f"      Fecha Enviado: {fecha_enviado}")
-                logger.info(f"      Segundos: {segundos}")
-                logger.info(f"      Formato mm:ss: {formato_mmss}")
-                break  # Solo mostrar un ejemplo
+            # Mostrar distribución de categorías
+            logger.info("  Distribución de categorías de tiempo agente:")
+            categorias = df["Categoria tiempo agente"].value_counts()
+            for categoria, count in categorias.items():
+                if pd.notna(categoria):
+                    logger.info(f"    {categoria}: {count}")
+            
+            # Mostrar un ejemplo
+            idx_ejemplo = df[mask_fechas_validas].index[0]
+            ejemplo = df.loc[idx_ejemplo]
+            logger.info(f"  Ejemplo de cálculo:")
+            logger.info(f"    Segundos: {ejemplo['Tiempo de captura agente segundos']:.0f}")
+            logger.info(f"    Formato mm:ss: {ejemplo['Tiempo de captura agente']}")
+            logger.info(f"    Categoría: {ejemplo['Categoria tiempo agente']}")
         
         # Estadísticas descriptivas
         if segundos_no_nulos > 0:
@@ -182,13 +270,14 @@ def calcular_tiempos_agente_robot(df):
             mean_seg = df["Tiempo de captura agente segundos"].mean()
             
             logger.info(f"  Estadísticas (segundos):")
-            logger.info(f"    Mínimo: {min_seg:.0f}s ({calcular_tiempo_en_minutos_segundos(min_seg)})")
-            logger.info(f"    Máximo: {max_seg:.0f}s ({calcular_tiempo_en_minutos_segundos(max_seg)})")
-            logger.info(f"    Promedio: {mean_seg:.0f}s ({calcular_tiempo_en_minutos_segundos(mean_seg)})")
+            logger.info(f"    Mínimo: {min_seg:.0f}s")
+            logger.info(f"    Máximo: {max_seg:.0f}s")
+            logger.info(f"    Promedio: {mean_seg:.0f}s")
     else:
         logger.warning("  ⚠️ No hay filas con ambas fechas válidas para calcular")
         df["Tiempo de captura agente"] = None
         df["Tiempo de captura agente segundos"] = None
+        df["Categoria tiempo agente"] = None
     
     # =========================
     # 2. TIEMPO DE ALTA ROBOT (Fecha Atendido - Fecha Asignacion)
@@ -200,7 +289,6 @@ def calcular_tiempos_agente_robot(df):
     for col in columnas_requeridas:
         if col not in df.columns:
             logger.error(f"❌ Columna '{col}' no encontrada para cálculo")
-            # En lugar de retornar, continuamos pero sin calcular
             return df
     
     # Calcular diferencia en segundos
@@ -221,25 +309,30 @@ def calcular_tiempos_agente_robot(df):
             mask_fechas_validas, "Tiempo de alta robot segundos"
         ].apply(calcular_tiempo_en_minutos_segundos)
         
+        # Categorizar tiempo alta robot
+        df.loc[mask_fechas_validas, "Categoria tiempo Alta robot"] = df.loc[
+            mask_fechas_validas, "Tiempo de alta robot segundos"
+        ].apply(categorizar_tiempo_alta_robot)
+        
         # Estadísticas
         segundos_no_nulos = df["Tiempo de alta robot segundos"].notna().sum()
         logger.info(f"  Tiempos calculados: {segundos_no_nulos}")
         
         if segundos_no_nulos > 0:
-            # Mostrar algunos ejemplos
-            ejemplos_idx = df[mask_fechas_validas].index[:3]
-            for idx in ejemplos_idx:
-                fecha_asignacion = df.loc[idx, "Fecha Asignacion"]
-                fecha_atendido = df.loc[idx, "Fecha Atendido"]
-                segundos = df.loc[idx, "Tiempo de alta robot segundos"]
-                formato_mmss = df.loc[idx, "Tiempo de alta robot"]
-                
-                logger.info(f"    Ejemplo:")
-                logger.info(f"      Fecha Asignacion: {fecha_asignacion}")
-                logger.info(f"      Fecha Atendido: {fecha_atendido}")
-                logger.info(f"      Segundos: {segundos}")
-                logger.info(f"      Formato mm:ss: {formato_mmss}")
-                break  # Solo mostrar un ejemplo
+            # Mostrar distribución de categorías
+            logger.info("  Distribución de categorías de tiempo alta robot:")
+            categorias = df["Categoria tiempo Alta robot"].value_counts()
+            for categoria, count in categorias.items():
+                if pd.notna(categoria):
+                    logger.info(f"    {categoria}: {count}")
+            
+            # Mostrar un ejemplo
+            idx_ejemplo = df[mask_fechas_validas].index[0]
+            ejemplo = df.loc[idx_ejemplo]
+            logger.info(f"  Ejemplo de cálculo:")
+            logger.info(f"    Segundos: {ejemplo['Tiempo de alta robot segundos']:.0f}")
+            logger.info(f"    Formato mm:ss: {ejemplo['Tiempo de alta robot']}")
+            logger.info(f"    Categoría: {ejemplo['Categoria tiempo Alta robot']}")
         
         # Estadísticas descriptivas
         if segundos_no_nulos > 0:
@@ -248,44 +341,56 @@ def calcular_tiempos_agente_robot(df):
             mean_seg = df["Tiempo de alta robot segundos"].mean()
             
             logger.info(f"  Estadísticas (segundos):")
-            logger.info(f"    Mínimo: {min_seg:.0f}s ({calcular_tiempo_en_minutos_segundos(min_seg)})")
-            logger.info(f"    Máximo: {max_seg:.0f}s ({calcular_tiempo_en_minutos_segundos(max_seg)})")
-            logger.info(f"    Promedio: {mean_seg:.0f}s ({calcular_tiempo_en_minutos_segundos(mean_seg)})")
+            logger.info(f"    Mínimo: {min_seg:.0f}s")
+            logger.info(f"    Máximo: {max_seg:.0f}s")
+            logger.info(f"    Promedio: {mean_seg:.0f}s")
     else:
         logger.warning("  ⚠️ No hay filas con ambas fechas válidas para calcular")
         df["Tiempo de alta robot"] = None
         df["Tiempo de alta robot segundos"] = None
+        df["Categoria tiempo Alta robot"] = None
     
-    # =========================
-    # 3. RESUMEN FINAL
-    # =========================
-    logger.info("\n📊 RESUMEN DE CÁLCULOS:")
+    return df
+
+def calcular_categorias_cargos(df):
+    """
+    Calcula la categoría de cargos basada en el número de cargos
+    """
+    logger.info("\n💰 CALCULANDO CATEGORÍAS DE CARGOS...")
     
-    # Tiempo de captura agente
-    captura_calculados = df["Tiempo de captura agente"].notna().sum()
-    captura_segundos_calc = df["Tiempo de captura agente segundos"].notna().sum()
-    logger.info(f"  Tiempo de captura agente: {captura_calculados} calculados")
-    logger.info(f"  Tiempo de captura agente segundos: {captura_segundos_calc} calculados")
+    if "Numero de cargos" not in df.columns:
+        logger.warning("⚠️ Columna 'Numero de cargos' no encontrada")
+        df["Categoria de cargos"] = None
+        return df
     
-    # Tiempo de alta robot
-    alta_calculados = df["Tiempo de alta robot"].notna().sum()
-    alta_segundos_calc = df["Tiempo de alta robot segundos"].notna().sum()
-    logger.info(f"  Tiempo de alta robot: {alta_calculados} calculados")
-    logger.info(f"  Tiempo de alta robot segundos: {alta_segundos_calc} calculados")
+    # Calcular categorías
+    valores_no_nulos = df["Numero de cargos"].notna().sum()
+    logger.info(f"  Filas con número de cargos válido: {valores_no_nulos}/{len(df)}")
     
-    # Ejemplos finales
-    if captura_calculados > 0:
-        fila_ejemplo = df[df["Tiempo de captura agente"].notna()].iloc[0]
-        logger.info(f"\n  Ejemplo final de cálculos:")
-        logger.info(f"    Tiempo de captura agente: {fila_ejemplo['Tiempo de captura agente']}")
-        logger.info(f"    Tiempo de captura agente segundos: {fila_ejemplo['Tiempo de captura agente segundos']:.0f}")
-    
-    if alta_calculados > 0:
-        if captura_calculados == 0:
-            fila_ejemplo = df[df["Tiempo de alta robot"].notna()].iloc[0]
-            logger.info(f"\n  Ejemplo final de cálculos:")
-        logger.info(f"    Tiempo de alta robot: {fila_ejemplo['Tiempo de alta robot']}")
-        logger.info(f"    Tiempo de alta robot segundos: {fila_ejemplo['Tiempo de alta robot segundos']:.0f}")
+    if valores_no_nulos > 0:
+        # Aplicar categorización
+        df["Categoria de cargos"] = df["Numero de cargos"].apply(categorizar_numero_cargos)
+        
+        # Mostrar distribución
+        logger.info("  Distribución de categorías de cargos:")
+        categorias = df["Categoria de cargos"].value_counts().head(10)  # Mostrar top 10
+        for categoria, count in categorias.items():
+            if pd.notna(categoria):
+                logger.info(f"    {categoria}: {count}")
+        
+        # Mostrar un ejemplo
+        idx_ejemplo = df[df["Categoria de cargos"].notna()].index[0]
+        ejemplo = df.loc[idx_ejemplo]
+        logger.info(f"  Ejemplo:")
+        logger.info(f"    Número de cargos: {ejemplo['Numero de cargos']}")
+        logger.info(f"    Categoría: {ejemplo['Categoria de cargos']}")
+        
+        # Estadísticas
+        total_categorias = df["Categoria de cargos"].notna().sum()
+        logger.info(f"  Total categorizados: {total_categorias}")
+    else:
+        logger.warning("  ⚠️ No hay valores válidos para categorizar")
+        df["Categoria de cargos"] = None
     
     return df
 
@@ -293,7 +398,7 @@ def calcular_tiempos_agente_robot(df):
 # MAIN
 # =========================
 def main():
-    logger.info("🚀 Generando Reporte Excel Aclarapp con cálculos de tiempo")
+    logger.info("🚀 Generando Reporte Excel Aclarapp con cálculos de tiempo y categorías")
 
     # =========================
     # CARGA CSV
@@ -392,18 +497,25 @@ def main():
     df = calcular_tiempos_agente_robot(df)
 
     # =========================
+    # CALCULAR CATEGORÍAS DE CARGOS
+    # =========================
+    df = calcular_categorias_cargos(df)
+
+    # =========================
     # OTRAS TRANSFORMACIONES
     # =========================
     logger.info("\n⚙️ APLICANDO OTRAS TRANSFORMACIONES...")
     
-    # Convertir "Cargos" a número
-    if "Cargos" in df.columns:
+    # Convertir "Cargos" a número (si no se hizo antes)
+    if "Cargos" in df.columns and "Numero de cargos" not in df.columns:
         df["Numero de cargos"] = pd.to_numeric(
             df["Cargos"], errors="coerce"
         )
         logger.info(f"✓ 'Cargos' convertido a número para 'Numero de cargos'")
-    else:
-        df["Numero de cargos"] = None
+    
+    # Si ya existe 'Numero de cargos' pero no tiene categorías, calcularlas
+    if "Numero de cargos" in df.columns and "Categoria de cargos" not in df.columns:
+        df = calcular_categorias_cargos(df)
     
     # Cambiar Estatus a "Exitoso"
     if "Estatus" in df.columns:
@@ -465,30 +577,39 @@ def main():
     # =========================
     # VERIFICAR RESULTADOS DE CÁLCULOS
     # =========================
-    logger.info("\n🔍 VERIFICANDO RESULTADOS DE CÁLCULOS...")
+    logger.info("\n🔍 VERIFICANDO RESULTADOS DE CÁLCULOS Y CATEGORÍAS...")
     
     # Verificar tiempos calculados
     if "Tiempo de captura agente" in df_final.columns:
         captura_calc = df_final["Tiempo de captura agente"].notna().sum()
-        captura_seg_calc = df_final["Tiempo de captura agente segundos"].notna().sum()
-        
         if captura_calc > 0:
-            ejemplo = df_final[df_final["Tiempo de captura agente"].notna()].iloc[0]
             logger.info(f"✓ Tiempo de captura agente: {captura_calc} calculados")
-            logger.info(f"  Ejemplo: {ejemplo['Tiempo de captura agente']} (={ejemplo['Tiempo de captura agente segundos']}s)")
-        else:
-            logger.warning("⚠️ No se calcularon tiempos de captura agente")
+    
+    if "Categoria tiempo agente" in df_final.columns:
+        categorias_agente = df_final["Categoria tiempo agente"].value_counts()
+        if not categorias_agente.empty:
+            logger.info("Distribución de categorías tiempo agente:")
+            for cat, count in categorias_agente.head(5).items():
+                logger.info(f"  {cat}: {count}")
     
     if "Tiempo de alta robot" in df_final.columns:
         alta_calc = df_final["Tiempo de alta robot"].notna().sum()
-        alta_seg_calc = df_final["Tiempo de alta robot segundos"].notna().sum()
-        
         if alta_calc > 0:
-            ejemplo = df_final[df_final["Tiempo de alta robot"].notna()].iloc[0]
             logger.info(f"✓ Tiempo de alta robot: {alta_calc} calculados")
-            logger.info(f"  Ejemplo: {ejemplo['Tiempo de alta robot']} (={ejemplo['Tiempo de alta robot segundos']}s)")
-        else:
-            logger.warning("⚠️ No se calcularon tiempos de alta robot")
+    
+    if "Categoria tiempo Alta robot" in df_final.columns:
+        categorias_robot = df_final["Categoria tiempo Alta robot"].value_counts()
+        if not categorias_robot.empty:
+            logger.info("Distribución de categorías tiempo alta robot:")
+            for cat, count in categorias_robot.head(5).items():
+                logger.info(f"  {cat}: {count}")
+    
+    if "Categoria de cargos" in df_final.columns:
+        categorias_cargos = df_final["Categoria de cargos"].value_counts()
+        if not categorias_cargos.empty:
+            logger.info("Distribución de categorías de cargos:")
+            for cat, count in categorias_cargos.head(5).items():
+                logger.info(f"  {cat}: {count}")
 
     # =========================
     # EXPORTAR EXCEL
@@ -535,13 +656,18 @@ def main():
     logger.info(f"Archivo: {OUTPUT_FILE.name}")
     logger.info(f"Total filas: {len(df_final)}")
     
-    if "Tiempo de captura agente" in df_final.columns:
-        calc = df_final["Tiempo de captura agente"].notna().sum()
-        logger.info(f"Tiempos de captura agente calculados: {calc}")
+    # Resumen de categorías
+    if "Categoria tiempo agente" in df_final.columns:
+        total_cat = df_final["Categoria tiempo agente"].notna().sum()
+        logger.info(f"Categorías tiempo agente calculadas: {total_cat}")
     
-    if "Tiempo de alta robot" in df_final.columns:
-        calc = df_final["Tiempo de alta robot"].notna().sum()
-        logger.info(f"Tiempos de alta robot calculados: {calc}")
+    if "Categoria tiempo Alta robot" in df_final.columns:
+        total_cat = df_final["Categoria tiempo Alta robot"].notna().sum()
+        logger.info(f"Categorías tiempo alta robot calculadas: {total_cat}")
+    
+    if "Categoria de cargos" in df_final.columns:
+        total_cat = df_final["Categoria de cargos"].notna().sum()
+        logger.info(f"Categorías de cargos calculadas: {total_cat}")
     
     logger.info("="*60)
 
