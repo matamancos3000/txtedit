@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 import unicodedata
 import re
+from datetime import datetime
 
 # =========================
 # LOGGING
@@ -78,11 +79,9 @@ def limpiar_formato_fecha_especial(valor):
     
     return valor_str.strip()
 
-def procesar_fecha_aclaraapp(valor):
+def convertir_formato_12h_a_iso(valor):
     """
-    Procesa fecha de Aclarapp específicamente
-    Formato origen: dd/MM/yyyy hh:mm:ss AM/PM
-    Formato destino: yyyy-MM-dd HH:mm:ss
+    Convierte fecha de formato 12h (dd/MM/yyyy hh:mm:ss AM/PM) a ISO (yyyy-MM-dd HH:mm:ss)
     """
     if pd.isna(valor):
         return None
@@ -92,45 +91,52 @@ def procesar_fecha_aclaraapp(valor):
     if not valor_str or valor_str.lower() in ['nan', 'nat', 'null', 'none', '']:
         return None
     
-    logger.debug(f"Procesando fecha Aclarapp: '{valor_str}'")
+    logger.debug(f"Convirtiendo: '{valor_str}'")
     
     try:
-        # PRIMERO: Limpiar formato especial si existe
+        # PRIMERO: Limpiar formato especial
         valor_limpio = limpiar_formato_fecha_especial(valor_str)
+        logger.debug(f"  Después de limpiar: '{valor_limpio}'")
         
-        # SEGUNDO: Convertir a datetime
-        # Intentar primero con formato AM/PM (12 horas)
+        # SEGUNDO: Intentar parsear como fecha con AM/PM
+        # Primero intentar con el formato exacto de Aclarapp
         try:
             fecha_dt = pd.to_datetime(
                 valor_limpio,
                 format='%d/%m/%Y %I:%M:%S %p',
                 errors='raise'
             )
-        except:
-            # Intentar con formato 24 horas
-            fecha_dt = pd.to_datetime(
-                valor_limpio,
-                format='%d/%m/%Y %H:%M:%S',
-                errors='raise'
-            )
+            logger.debug(f"  Parseado con formato 12h: {fecha_dt}")
+        except Exception as e1:
+            logger.debug(f"  Error con formato 12h: {e1}")
+            
+            # Intentar con formato 24h
+            try:
+                fecha_dt = pd.to_datetime(
+                    valor_limpio,
+                    format='%d/%m/%Y %H:%M:%S',
+                    errors='raise'
+                )
+                logger.debug(f"  Parseado con formato 24h: {fecha_dt}")
+            except Exception as e2:
+                logger.debug(f"  Error con formato 24h: {e2}")
+                
+                # Último intento: parseo automático
+                fecha_dt = pd.to_datetime(valor_limpio, dayfirst=True, errors='coerce')
+                if pd.notna(fecha_dt):
+                    logger.debug(f"  Parseado automático: {fecha_dt}")
+                else:
+                    logger.warning(f"  No se pudo parsear: '{valor_str}'")
+                    return None
         
         # TERCERO: Convertir a formato ISO
         fecha_iso = fecha_dt.strftime('%Y-%m-%d %H:%M:%S')
+        logger.debug(f"  Formato ISO: '{fecha_iso}'")
         
-        logger.debug(f"  Convertido a: '{fecha_iso}'")
         return fecha_iso
         
     except Exception as e:
-        logger.warning(f"Error procesando fecha Aclarapp '{valor_str}': {e}")
-        
-        # Último intento: parseo automático
-        try:
-            fecha_dt = pd.to_datetime(valor_str, dayfirst=True, errors='coerce')
-            if pd.notna(fecha_dt):
-                return fecha_dt.strftime('%Y-%m-%d %H:%M:%S')
-        except:
-            pass
-        
+        logger.error(f"Error en convertir_formato_12h_a_iso para '{valor_str}': {e}")
         return None
 
 def procesar_fecha_aclarabot(valor):
@@ -138,30 +144,15 @@ def procesar_fecha_aclarabot(valor):
     Procesa fecha de Aclarabot específicamente
     Formato destino: yyyy-MM-dd HH:mm:ss
     """
-    if pd.isna(valor):
-        return None
-    
-    valor_str = str(valor).strip()
-    
-    if not valor_str or valor_str.lower() in ['nan', 'nat', 'null', 'none', '']:
-        return None
-    
-    try:
-        # Limpiar formato especial si existe
-        valor_limpio = limpiar_formato_fecha_especial(valor_str)
-        
-        # Convertir a datetime
-        fecha_dt = pd.to_datetime(valor_limpio, dayfirst=True, errors='coerce')
-        
-        if pd.notna(fecha_dt):
-            # Convertir a formato ISO
-            return fecha_dt.strftime('%Y-%m-%d %H:%M:%S')
-        else:
-            return None
-            
-    except Exception as e:
-        logger.warning(f"Error procesando fecha Aclarabot '{valor_str}': {e}")
-        return None
+    return convertir_formato_12h_a_iso(valor)
+
+def procesar_fecha_aclaraapp(valor):
+    """
+    Procesa fecha de Aclarapp específicamente
+    Formato origen: dd/MM/yyyy hh:mm:ss AM/PM
+    Formato destino: yyyy-MM-dd HH:mm:ss
+    """
+    return convertir_formato_12h_a_iso(valor)
 
 def limpiar_cis(valor):
     """
@@ -185,6 +176,99 @@ def limpiar_cis(valor):
     
     return solo_numeros
 
+def corregir_fecha_creacion_despues_de_exportar(df):
+    """
+    Función específica para corregir la columna 'Fecha Creación' después del merge
+    """
+    if "Fecha Creación" not in df.columns:
+        logger.warning("Columna 'Fecha Creación' no encontrada para corregir")
+        return df
+    
+    logger.info("\n" + "="*60)
+    logger.info("CORRIGIENDO COLUMNA 'FECHA CREACIÓN' DESPUÉS DEL MERGE")
+    logger.info("="*60)
+    
+    # Contar valores antes
+    valores_antes = df["Fecha Creación"].notna().sum()
+    logger.info(f"Valores no nulos en 'Fecha Creación': {valores_antes}")
+    
+    if valores_antes == 0:
+        logger.info("No hay valores para corregir")
+        return df
+    
+    # Analizar el formato actual
+    ejemplos_antes = df["Fecha Creación"].dropna().head(5).tolist()
+    logger.info("Ejemplos ANTES de corrección:")
+    
+    formatos_detectados = set()
+    for i, ejemplo in enumerate(ejemplos_antes):
+        logger.info(f"  [{i}] '{ejemplo}'")
+        
+        # Detectar formato
+        if isinstance(ejemplo, str):
+            if re.search(r'\bAM\b|\bPM\b', ejemplo, re.IGNORECASE):
+                formatos_detectados.add("CON_AMPM")
+                logger.info(f"      → Detectado: Contiene AM/PM")
+            elif re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', ejemplo):
+                formatos_detectados.add("ISO")
+                logger.info(f"      → Detectado: Formato ISO correcto")
+            elif '/' in ejemplo:
+                formatos_detectados.add("CON_BARRAS")
+                logger.info(f"      → Detectado: Formato con /")
+            else:
+                formatos_detectados.add("OTRO")
+                logger.info(f"      → Detectado: Otro formato")
+    
+    # Aplicar corrección solo si hay fechas con AM/PM o formato incorrecto
+    if "CON_AMPM" in formatos_detectados or "CON_BARRAS" in formatos_detectados:
+        logger.info(f"\nAplicando corrección a 'Fecha Creación'...")
+        
+        # Guardar estado original para comparación
+        estado_original = df["Fecha Creación"].copy()
+        
+        # Aplicar conversión
+        df["Fecha Creación"] = df["Fecha Creación"].apply(convertir_formato_12h_a_iso)
+        
+        # Contar cambios
+        cambios = 0
+        total = 0
+        ejemplos_cambiados = []
+        
+        for idx in df.index:
+            original = estado_original[idx]
+            nuevo = df.loc[idx, "Fecha Creación"]
+            
+            if pd.notna(original) and pd.notna(nuevo):
+                total += 1
+                if original != nuevo:
+                    cambios += 1
+                    if len(ejemplos_cambiados) < 3:
+                        ejemplos_cambiados.append((original, nuevo))
+        
+        logger.info(f"Cambios realizados: {cambios}/{total}")
+        
+        if ejemplos_cambiados:
+            logger.info("Ejemplos de cambios:")
+            for i, (orig, nuevo) in enumerate(ejemplos_cambiados):
+                logger.info(f"  [{i}] '{orig}' → '{nuevo}'")
+        
+        # Verificar formato después
+        ejemplos_despues = df["Fecha Creación"].dropna().head(3).tolist()
+        logger.info("\nEjemplos DESPUÉS de corrección:")
+        formatos_correctos = 0
+        for i, ejemplo in enumerate(ejemplos_despues):
+            if isinstance(ejemplo, str) and re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', ejemplo):
+                formatos_correctos += 1
+                logger.info(f"  [{i}] '{ejemplo}' ✓")
+            else:
+                logger.warning(f"  [{i}] '{ejemplo}' ✗")
+        
+        logger.info(f"Formatos ISO correctos después: {formatos_correctos}/{len(ejemplos_despues)}")
+    else:
+        logger.info("No se necesita corrección - todas las fechas ya están en formato correcto")
+    
+    return df
+
 # =========================
 # MAIN
 # =========================
@@ -201,9 +285,6 @@ def main():
     aclarapp_df = cargar_csv(ACLARAPP_PATH, sep="|")
     logger.info(f"✓ Aclarapp cargado ({len(aclarapp_df)} filas)")
     
-    # Mostrar estructura de Aclarapp
-    logger.info(f"Columnas en Aclarapp: {list(aclarapp_df.columns)}")
-    
     # Procesar todas las fechas de Aclarapp
     columnas_fecha_aclaraapp = [
         "Fecha Creación", 
@@ -212,64 +293,27 @@ def main():
         "Fecha Atendido"
     ]
     
-    logger.info("\n📅 PROCESANDO FECHAS DE ACLARAPP (dd/MM/yyyy hh:mm:ss AM/PM → yyyy-MM-dd HH:mm:ss)")
+    logger.info("\n📅 PROCESANDO FECHAS DE ACLARAPP")
     
     for col in columnas_fecha_aclaraapp:
         if col in aclarapp_df.columns:
             logger.info(f"\nProcesando: {col}")
             
-            # Contar valores
             valores_antes = aclarapp_df[col].notna().sum()
             logger.info(f"  Valores no nulos: {valores_antes}")
             
             if valores_antes > 0:
-                # Mostrar ejemplos ANTES
-                ejemplos_antes = aclarapp_df[col].dropna().head(3).tolist()
-                logger.info(f"  Ejemplos ANTES del procesamiento:")
-                for i, ejemplo in enumerate(ejemplos_antes):
-                    logger.info(f"    {i}: '{ejemplo}'")
-                    # Mostrar también el formato exacto
-                    logger.info(f"      Longitud: {len(str(ejemplo))} chars")
-                
-                # Aplicar procesamiento específico para Aclarapp
+                # Aplicar procesamiento
                 aclarapp_df[col] = aclarapp_df[col].apply(procesar_fecha_aclaraapp)
                 
-                # Mostrar ejemplos DESPUÉS
-                ejemplos_despues = aclarapp_df[col].dropna().head(3).tolist()
-                logger.info(f"  Ejemplos DESPUÉS del procesamiento:")
-                for i, ejemplo in enumerate(ejemplos_despues):
-                    logger.info(f"    {i}: '{ejemplo}'")
-                    # Verificar formato ISO
-                    if isinstance(ejemplo, str) and re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', ejemplo):
-                        logger.info(f"      ✓ Formato ISO correcto")
-                    else:
-                        logger.warning(f"      ⚠️ Formato incorrecto!")
-                
-                # Contar valores después
+                # Verificar
                 valores_despues = aclarapp_df[col].notna().sum()
                 logger.info(f"  Valores convertidos: {valores_despues}/{valores_antes}")
     
-    # Limpiar columnas CIS en Aclarapp
-    logger.info("\n🧹 LIMPIANDO COLUMNAS CIS EN ACLARAPP")
+    # Limpiar y renombrar CIS
     if "CIS" in aclarapp_df.columns:
-        logger.info(f"Procesando columna: CIS")
-        
-        valores_antes = aclarapp_df["CIS"].notna().sum()
-        if valores_antes > 0:
-            ejemplos_antes = aclarapp_df["CIS"].dropna().head(3).tolist()
-            logger.info(f"  Ejemplos ANTES: {ejemplos_antes}")
-            
-            aclarapp_df["CIS"] = aclarapp_df["CIS"].apply(limpiar_cis)
-            
-            ejemplos_despues = aclarapp_df["CIS"].dropna().head(3).tolist()
-            logger.info(f"  Ejemplos DESPUÉS: {ejemplos_despues}")
-            
-            valores_despues = aclarapp_df["CIS"].notna().sum()
-            logger.info(f"  Valores antes/después: {valores_antes}/{valores_despues}")
-        
-        # Renombrar CIS a CIS_2
+        aclarapp_df["CIS"] = aclarapp_df["CIS"].apply(limpiar_cis)
         aclarapp_df.rename(columns={"CIS": "CIS_2"}, inplace=True)
-        logger.info(f"  ✓ Columna renombrada: CIS → CIS_2")
 
     # =========================
     # 2. CARGA Y PROCESAMIENTO DE ACLARABOT
@@ -281,28 +325,12 @@ def main():
     aclarabot_df = cargar_csv(ACLARABOT_PATH)
     logger.info(f"✓ Aclarabot cargado: {ACLARABOT_PATH.name} ({len(aclarabot_df)} filas)")
     
-    # Procesar fecha principal de Aclarabot
     if "Fecha" in aclarabot_df.columns:
         logger.info(f"\n📅 PROCESANDO FECHA PRINCIPAL DE ACLARABOT")
-        
         valores_originales = aclarabot_df["Fecha"].notna().sum()
-        logger.info(f"  Valores no nulos: {valores_originales}")
-        
-        if valores_originales > 0:
-            # Mostrar ejemplos originales
-            ejemplos = aclarabot_df["Fecha"].dropna().head(3).tolist()
-            logger.info(f"  Ejemplos originales:")
-            for i, ejemplo in enumerate(ejemplos):
-                logger.info(f"    {i}: '{ejemplo}'")
-            
-            # Aplicar procesamiento específico para Aclarabot
-            aclarabot_df["Fecha"] = aclarabot_df["Fecha"].apply(procesar_fecha_aclarabot)
-            
-            # Mostrar ejemplos después
-            ejemplos_final = aclarabot_df["Fecha"].dropna().head(3).tolist()
-            logger.info(f"  Ejemplos procesados:")
-            for i, ejemplo in enumerate(ejemplos_final):
-                logger.info(f"    {i}: '{ejemplo}'")
+        aclarabot_df["Fecha"] = aclarabot_df["Fecha"].apply(procesar_fecha_aclarabot)
+        valores_convertidos = aclarabot_df["Fecha"].notna().sum()
+        logger.info(f"  Convertidos: {valores_convertidos}/{valores_originales}")
 
     # =========================
     # 3. CARGA DE AGENTES
@@ -359,13 +387,17 @@ def main():
     df_final.drop(columns=["_merge"], inplace=True)
 
     # =========================
-    # 6. VERIFICACIÓN FINAL DE FORMATOS
+    # 6. CORREGIR 'FECHA CREACIÓN' DESPUÉS DEL MERGE
+    # =========================
+    df_final = corregir_fecha_creacion_despues_de_exportar(df_final)
+
+    # =========================
+    # 7. VERIFICAR TODAS LAS FECHAS
     # =========================
     logger.info("\n" + "="*60)
-    logger.info("6. VERIFICACIÓN FINAL DE FORMATOS")
+    logger.info("7. VERIFICACIÓN DE TODAS LAS FECHAS")
     logger.info("="*60)
     
-    # Lista de todas las columnas de fecha que deberían existir
     todas_columnas_fecha = [
         "Fecha", 
         "Fecha Creación", 
@@ -374,60 +406,37 @@ def main():
         "Fecha Atendido"
     ]
     
-    problemas_encontrados = []
-    
     for col in todas_columnas_fecha:
         if col in df_final.columns:
             valores_no_nulos = df_final[col].notna().sum()
-            logger.info(f"\n{col}:")
-            logger.info(f"  Valores no nulos: {valores_no_nulos}")
             
             if valores_no_nulos > 0:
-                # Tomar algunos ejemplos
-                ejemplos = df_final[col].dropna().head(5).tolist()
+                # Tomar ejemplos
+                ejemplos = df_final[col].dropna().head(3).tolist()
                 
-                # Contar formatos correctos
+                # Verificar formato
                 formatos_correctos = 0
-                formatos_incorrectos = []
-                
                 for i, ejemplo in enumerate(ejemplos):
-                    if isinstance(ejemplo, str):
-                        # Verificar formato ISO: yyyy-MM-dd HH:mm:ss
-                        if re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', ejemplo):
-                            formatos_correctos += 1
-                            if i < 3:  # Mostrar solo primeros 3 correctos
-                                logger.info(f"    ✓ Ejemplo {i}: '{ejemplo}'")
-                        else:
-                            formatos_incorrectos.append((i, ejemplo))
-                            if i < 3:  # Mostrar solo primeros 3 incorrectos
-                                logger.warning(f"    ✗ Ejemplo {i}: '{ejemplo}'")
-                                # Intentar identificar el formato
-                                if 'AM' in ejemplo.upper() or 'PM' in ejemplo.upper():
-                                    logger.warning(f"      ⚠️ Contiene AM/PM")
-                                elif '/' in ejemplo:
-                                    logger.warning(f"      ⚠️ Formato con /")
+                    if isinstance(ejemplo, str) and re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', ejemplo):
+                        formatos_correctos += 1
+                        if i == 0:  # Solo mostrar el primer ejemplo si es correcto
+                            logger.info(f"{col:<20}: {valores_no_nulos:>5} ✓ Ej: '{ejemplo}'")
+                    else:
+                        # Mostrar todos los ejemplos incorrectos
+                        logger.warning(f"{col:<20}: [{i}] '{ejemplo}' ✗")
                 
-                logger.info(f"  Formatos ISO correctos: {formatos_correctos}/{len(ejemplos)}")
-                
-                if formatos_incorrectos:
-                    problemas_encontrados.append((col, formatos_incorrectos))
-                    
-                    # Si hay muchos problemas, forzar la conversión
-                    if formatos_correctos == 0:
-                        logger.warning(f"  ⚠️ FORZANDO CONVERSIÓN DE {col}...")
-                        if col == "Fecha":
-                            df_final[col] = df_final[col].apply(procesar_fecha_aclarabot)
-                        else:
-                            df_final[col] = df_final[col].apply(procesar_fecha_aclaraapp)
-        
-        else:
-            logger.warning(f"  ⚠️ Columna no encontrada: {col}")
+                if formatos_correctos == len(ejemplos) and len(ejemplos) > 0:
+                    pass  # Ya se mostró arriba
+                elif formatos_correctos > 0:
+                    logger.info(f"{col:<20}: {valores_no_nulos:>5} ({formatos_correctos}/{len(ejemplos)} correctos)")
+                else:
+                    logger.warning(f"{col:<20}: {valores_no_nulos:>5} (0/{len(ejemplos)} correctos)")
 
     # =========================
-    # 7. ORDENAR POR FECHA
+    # 8. ORDENAR POR FECHA
     # =========================
     logger.info("\n" + "="*60)
-    logger.info("7. ORDENANDO POR FECHA")
+    logger.info("8. ORDENANDO POR FECHA")
     logger.info("="*60)
     
     if "Fecha" in df_final.columns:
@@ -435,23 +444,11 @@ def main():
         df_final['_fecha_temp'] = pd.to_datetime(df_final['Fecha'], errors='coerce')
         
         fechas_validas = df_final['_fecha_temp'].notna().sum()
-        logger.info(f"Fechas válidas para ordenar: {fechas_validas}/{len(df_final)}")
-        
         if fechas_validas > 0:
-            fecha_min = df_final['_fecha_temp'].min()
-            fecha_max = df_final['_fecha_temp'].max()
-            logger.info(f"Rango de fechas: {fecha_min} a {fecha_max}")
-            
             df_final.sort_values('_fecha_temp', inplace=True, na_position="last")
-            logger.info(f"✓ Datos ordenados por fecha")
-            
-            # Mostrar primera y última fecha
-            primera = df_final.iloc[0]['Fecha'] if df_final['_fecha_temp'].iloc[0] else "N/A"
-            ultima_valida_idx = fechas_validas - 1 if fechas_validas > 0 else 0
-            ultima = df_final.iloc[ultima_valida_idx]['Fecha'] if fechas_validas > 0 else "N/A"
-            
-            logger.info(f"Primera fecha: {primera}")
-            logger.info(f"Última fecha válida: {ultima}")
+            logger.info(f"✓ Ordenado por fecha ({fechas_validas} fechas válidas)")
+        else:
+            logger.warning("⚠️ No hay fechas válidas para ordenar")
         
         # Eliminar columna temporal
         df_final.drop(columns=['_fecha_temp'], inplace=True)
@@ -459,47 +456,153 @@ def main():
         logger.warning("No se encontró columna 'Fecha' para ordenar")
 
     # =========================
-    # 8. EXPORTAR CSV
+    # 9. EXPORTAR CSV TEMPORAL
     # =========================
     logger.info("\n" + "="*60)
-    logger.info("8. EXPORTANDO CSV")
+    logger.info("9. EXPORTANDO CSV TEMPORAL")
+    logger.info("="*60)
+    
+    # Guardar temporalmente
+    TEMP_FILE = BASE_PATH / "temp_export.csv"
+    logger.info(f"Guardando archivo temporal: {TEMP_FILE}")
+    
+    df_final.to_csv(
+        TEMP_FILE,
+        index=False,
+        encoding="utf-8-sig"
+    )
+    
+    logger.info(f"✓ Archivo temporal guardado ({len(df_final)} filas)")
+
+    # =========================
+    # 10. LECTURA Y CORRECCIÓN FINAL
+    # =========================
+    logger.info("\n" + "="*60)
+    logger.info("10. LECTURA Y CORRECCIÓN FINAL")
+    logger.info("="*60)
+    
+    # Leer el archivo temporal para asegurar formato limpio
+    logger.info("Leyendo archivo temporal para corrección final...")
+    df_corregido = pd.read_csv(
+        TEMP_FILE,
+        dtype=str,
+        encoding="utf-8-sig"
+    )
+    
+    # Aplicar corrección FINAL a 'Fecha Creación'
+    logger.info("\nAPLICANDO CORRECCIÓN FINAL A 'FECHA CREACIÓN'...")
+    
+    if "Fecha Creación" in df_corregido.columns:
+        valores_totales = len(df_corregido)
+        valores_no_nulos = df_corregido["Fecha Creación"].notna().sum()
+        
+        logger.info(f"Total de filas: {valores_totales}")
+        logger.info(f"Fechas no nulas: {valores_no_nulos}")
+        
+        if valores_no_nulos > 0:
+            # Mostrar estado actual
+            ejemplos_actuales = df_corregido["Fecha Creación"].dropna().head(5).tolist()
+            logger.info("Estado ACTUAL de 'Fecha Creación':")
+            
+            for i, ejemplo in enumerate(ejemplos_actuales):
+                logger.info(f"  [{i}] '{ejemplo}'")
+                
+                # Verificar si necesita conversión
+                necesita_conversion = False
+                if isinstance(ejemplo, str):
+                    if re.search(r'\bAM\b|\bPM\b', ejemplo, re.IGNORECASE):
+                        necesita_conversion = True
+                        logger.info(f"      → Necesita conversión (tiene AM/PM)")
+                    elif not re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', ejemplo):
+                        if '/' in ejemplo:
+                            necesita_conversion = True
+                            logger.info(f"      → Necesita conversión (formato con /)")
+            
+            # Aplicar conversión SI es necesario
+            if necesita_conversion:
+                logger.info("\nAplicando conversión final...")
+                
+                # Contador para seguimiento
+                convertidos = 0
+                no_convertidos = 0
+                ejemplos_conversion = []
+                
+                for idx in df_corregido.index:
+                    valor_original = df_corregido.loc[idx, "Fecha Creación"]
+                    
+                    if pd.notna(valor_original):
+                        nuevo_valor = convertir_formato_12h_a_iso(valor_original)
+                        
+                        if nuevo_valor is not None:
+                            df_corregido.loc[idx, "Fecha Creación"] = nuevo_valor
+                            convertidos += 1
+                            
+                            if len(ejemplos_conversion) < 3 and valor_original != nuevo_valor:
+                                ejemplos_conversion.append((valor_original, nuevo_valor))
+                        else:
+                            no_convertidos += 1
+                
+                logger.info(f"Fechas convertidas: {convertidos}")
+                logger.info(f"Fechas no convertidas: {no_convertidos}")
+                
+                if ejemplos_conversion:
+                    logger.info("Ejemplos de conversión:")
+                    for i, (orig, nuevo) in enumerate(ejemplos_conversion):
+                        logger.info(f"  [{i}] '{orig}' → '{nuevo}'")
+                
+                # Verificar formato después
+                ejemplos_finales = df_corregido["Fecha Creación"].dropna().head(3).tolist()
+                logger.info("\nFormato FINAL de 'Fecha Creación':")
+                
+                for i, ejemplo in enumerate(ejemplos_finales):
+                    if isinstance(ejemplo, str) and re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', ejemplo):
+                        logger.info(f"  [{i}] '{ejemplo}' ✓")
+                    else:
+                        logger.warning(f"  [{i}] '{ejemplo}' ✗")
+            else:
+                logger.info("✓ No se necesita conversión - formato ya es correcto")
+    
+    # =========================
+    # 11. EXPORTAR CSV FINAL
+    # =========================
+    logger.info("\n" + "="*60)
+    logger.info("11. EXPORTANDO CSV FINAL")
     logger.info("="*60)
     
     logger.info(f"Exportando a: {OUTPUT_FILE}")
-    logger.info(f"Total de filas: {len(df_final)}")
     
-    df_final.to_csv(
+    df_corregido.to_csv(
         OUTPUT_FILE,
         index=False,
         encoding="utf-8-sig"
     )
     
-    logger.info("✅ Archivo exportado correctamente")
+    # Eliminar archivo temporal
+    if TEMP_FILE.exists():
+        TEMP_FILE.unlink()
+        logger.info("✓ Archivo temporal eliminado")
+    
+    logger.info("✅ Archivo FINAL exportado correctamente")
     
     # Resumen final
     logger.info("\n" + "="*60)
     logger.info("RESUMEN FINAL")
     logger.info("="*60)
     
-    logger.info("FORMATO FECHAS (todos deberían ser yyyy-MM-dd HH:mm:ss):")
-    for col in todas_columnas_fecha:
-        if col in df_final.columns:
-            no_nulos = df_final[col].notna().sum()
-            if no_nulos > 0:
-                ejemplo = df_final[col].dropna().iloc[0]
-                logger.info(f"  {col:<20}: {no_nulos:>5} valores | Ej: {ejemplo}")
+    logger.info(f"Archivo: {OUTPUT_FILE}")
+    logger.info(f"Total filas: {len(df_corregido)}")
     
-    logger.info("\nCOLUMNAS CIS:")
-    if "CIS_2" in df_final.columns:
-        cis_valores = df_final["CIS_2"].dropna()
-        if len(cis_valores) > 0:
-            ejemplo_cis = cis_valores.iloc[0]
-            logger.info(f"  CIS_2: {len(cis_valores)} valores | Ej: {ejemplo_cis}")
-            # Verificar que solo tenga números
-            if isinstance(ejemplo_cis, str) and re.match(r'^\d+$', ejemplo_cis):
-                logger.info(f"    ✓ Solo números: SI")
-            else:
-                logger.warning(f"    ⚠️ Solo números: NO")
+    logger.info("\nFORMATO DE FECHAS (todos en yyyy-MM-dd HH:mm:ss):")
+    for col in todas_columnas_fecha:
+        if col in df_corregido.columns:
+            no_nulos = df_corregido[col].notna().sum()
+            if no_nulos > 0:
+                ejemplo = df_corregido[col].dropna().iloc[0]
+                # Verificar formato
+                if isinstance(ejemplo, str) and re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', ejemplo):
+                    logger.info(f"  {col:<20}: {no_nulos:>5} ✓ Ej: {ejemplo}")
+                else:
+                    logger.warning(f"  {col:<20}: {no_nulos:>5} ✗ Ej: '{ejemplo}'")
 
 # =========================
 # EJECUCIÓN
