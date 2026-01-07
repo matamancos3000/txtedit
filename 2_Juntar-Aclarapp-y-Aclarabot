@@ -2,6 +2,7 @@ import pandas as pd
 import logging
 from pathlib import Path
 import unicodedata
+import re
 
 # =========================
 # LOGGING
@@ -43,6 +44,38 @@ def cargar_csv(ruta, sep=","):
     df.columns = [normalizar_columna(c) for c in df.columns]
     df = df.apply(lambda col: col.str.strip() if col.dtype == "object" else col)
     return df
+
+def normalizar_fecha_12h_a_24h(fecha_str):
+    """
+    Convierte fecha con formato 12h (p.m./a.m. o PM/AM) a formato 24h
+    """
+    if pd.isna(fecha_str) or fecha_str == '' or fecha_str == 'nan':
+        return fecha_str
+    
+    fecha_str = str(fecha_str).strip()
+    
+    # Normalizar AM/PM (manejar p.m., pm, P.M., PM, etc.)
+    # Primero extraer la parte de AM/PM
+    patron_am_pm = r'\s*([ap]\.?m\.?)\s*$'
+    match = re.search(patron_am_pm, fecha_str, re.IGNORECASE)
+    
+    if match:
+        am_pm = match.group(1).upper()
+        # Quitar el AM/PM del string original
+        fecha_sin_ampm = re.sub(patron_am_pm, '', fecha_str, flags=re.IGNORECASE).strip()
+        
+        # Convertir AM/PM a formato estándar
+        if 'A' in am_pm.upper():
+            am_pm_std = 'AM'
+        elif 'P' in am_pm.upper():
+            am_pm_std = 'PM'
+        else:
+            am_pm_std = 'AM'  # Por defecto
+            
+        # Reconstruir con formato estándar
+        fecha_str = f"{fecha_sin_ampm} {am_pm_std}"
+    
+    return fecha_str
 
 # =========================
 # MAIN
@@ -99,15 +132,87 @@ def main():
     df_final.drop(columns=["_merge"], inplace=True)
 
     # =========================
-    # ORDENAR POR FECHA
+    # NORMALIZAR TODAS LAS COLUMNAS DE FECHA A FORMATO 24 HORAS
     # =========================
-    df_final["Fecha"] = pd.to_datetime(
-        df_final["Fecha"],
-        format="%d/%m/%Y %H:%M:%S",
-        errors="coerce"
-    )
+    logger.info("🔄 Normalizando columnas de fecha a formato 24h...")
+    
+    columnas_fecha = [
+        "Fecha", 
+        "Fecha Creación", 
+        "Fecha Enviado", 
+        "Fecha Asignacion", 
+        "Fecha Atendido"
+    ]
+    
+    for col in columnas_fecha:
+        if col in df_final.columns:
+            logger.info(f"  Procesando columna: {col}")
+            
+            # Contar valores no nulos antes
+            valores_no_nulos = df_final[col].notna().sum()
+            logger.info(f"    Valores a procesar: {valores_no_nulos}")
+            
+            # Normalizar formato 12h a estándar
+            df_final[col] = df_final[col].apply(normalizar_fecha_12h_a_24h)
+            
+            # Convertir a datetime con formato de 12 horas
+            try:
+                # Intentar con formato específico primero
+                df_final[col] = pd.to_datetime(
+                    df_final[col],
+                    format="%d/%m/%Y %I:%M:%S %p",  # %I para 12h, %p para AM/PM
+                    errors="coerce"
+                )
+            except:
+                # Si falla, intentar inferir el formato
+                df_final[col] = pd.to_datetime(
+                    df_final[col],
+                    dayfirst=True,  # Importante para dd/mm/yyyy
+                    errors="coerce"
+                )
+            
+            # Verificar conversión
+            nulos = df_final[col].isna().sum()
+            convertidas = valores_no_nulos - nulos
+            logger.info(f"    Fechas convertidas: {convertidas}/{valores_no_nulos}")
+            
+            if nulos > 0 and nulos < 10:
+                # Mostrar algunas fechas problemáticas
+                ejemplos = df_final.loc[df_final[col].isna(), col].head(3).tolist()
+                logger.warning(f"    Ejemplos de fechas no convertidas: {ejemplos}")
 
-    df_final.sort_values("Fecha", inplace=True)
+    # =========================
+    # ORDENAR POR FECHA (de más antigua a más actual)
+    # =========================
+    if "Fecha" in df_final.columns:
+        logger.info(f"📅 Ordenando por columna 'Fecha' (de más antigua a más actual)")
+        
+        # Crear copia temporal para ordenar manteniendo nulos al final
+        df_final["_temp_orden"] = df_final["Fecha"]
+        
+        # Ordenar (los NaN/NaT van al final por defecto)
+        df_final.sort_values("_temp_orden", inplace=True, na_position="last")
+        
+        # Eliminar columna temporal
+        df_final.drop("_temp_orden", axis=1, inplace=True)
+        
+        # Verificar ordenamiento
+        if df_final["Fecha"].notna().sum() > 1:
+            primera_fecha = df_final["Fecha"].iloc[0]
+            ultima_fecha = df_final["Fecha"].iloc[-1]
+            logger.info(f"  Primera fecha: {primera_fecha}")
+            logger.info(f"  Última fecha: {ultima_fecha}")
+    else:
+        logger.warning("⚠️ No se encontró columna 'Fecha' para ordenar")
+
+    # =========================
+    # FORMATEAR FECHAS PARA SALIDA (opcional)
+    # =========================
+    # Si quieres que en el CSV salgan en formato dd/MM/YYYY HH:MM:SS
+    for col in columnas_fecha:
+        if col in df_final.columns:
+            # Convertir a string con formato 24h
+            df_final[col] = df_final[col].dt.strftime("%d/%m/%Y %H:%M:%S")
 
     # =========================
     # EXPORTAR CSV
@@ -121,6 +226,13 @@ def main():
     logger.info("✅ Archivo generado correctamente")
     logger.info(f"📄 {OUTPUT_FILE}")
     logger.info(f"📊 Total filas: {len(df_final)}")
+    
+    # Resumen de columnas de fecha
+    logger.info("📅 Resumen de columnas de fecha:")
+    for col in columnas_fecha:
+        if col in df_final.columns:
+            no_nulos = df_final[col].notna().sum()
+            logger.info(f"  {col}: {no_nulos}/{len(df_final)} valores")
 
 # =========================
 # EJECUCIÓN
