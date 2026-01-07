@@ -3,7 +3,6 @@ import logging
 from pathlib import Path
 from datetime import datetime
 import locale
-import re
 
 # =========================
 # LOGGING
@@ -28,7 +27,10 @@ CSV_FILE = next(BASE_PATH.glob("Acumulado_filtrado_*.csv"))
 try:
     locale.setlocale(locale.LC_TIME, "Spanish_Spain")
 except:
-    locale.setlocale(locale.LC_TIME, "es_ES")
+    try:
+        locale.setlocale(locale.LC_TIME, "es_ES")
+    except:
+        logger.warning("⚠️ No se pudo configurar locale en español")
 
 HOY = datetime.now()
 FECHA_TEXTO = HOY.strftime("%d-%B").capitalize()  # Ej: 7-Enero
@@ -48,8 +50,8 @@ COLUMNAS_SALIDA = [
     "Estatus",
     "Registro",
     "Folio",
-    "CIS_1",
-    "Fecha Creación",
+    "CIS",
+    "Fecha Creacion",
     "Fecha Enviado",
     "Fecha Asignacion",
     "Fecha Atendido",
@@ -71,7 +73,8 @@ def convertir_fecha(df, columna):
     if columna in df.columns:
         df[columna] = pd.to_datetime(
             df[columna],
-            format="%d/%m/%Y %H:%M:%S",
+            dayfirst=True,
+            infer_datetime_format=True,
             errors="coerce"
         )
 
@@ -101,7 +104,7 @@ def main():
     # =========================
     columnas_fecha = [
         "Fecha",
-        "Fecha Creación",
+        "Fecha Creacion",
         "Fecha Enviado",
         "Fecha Asignacion",
         "Fecha Atendido"
@@ -109,17 +112,19 @@ def main():
 
     for col in columnas_fecha:
         convertir_fecha(df, col)
+        validas = df[col].notna().sum()
+        logger.info(f"📅 {col}: {validas}/{len(df)} fechas válidas")
 
     # =========================
     # TIEMPOS
     # =========================
     df["Tiempo de captura agente"] = minutos_entre(
-        df["Fecha Enviado"], df["Fecha Creación"]
-    )
+        df["Fecha Enviado"], df["Fecha Creacion"]
+    ).round(2)
 
     df["Tiempo de alta robot"] = minutos_entre(
         df["Fecha"], df["Fecha Asignacion"]
-    )
+    ).round(2)
 
     df["Tiempo de captura agente segundos"] = (
         df["Tiempo de captura agente"] * 60
@@ -128,6 +133,10 @@ def main():
     df["Tiempo de alta robot segundos"] = (
         df["Tiempo de alta robot"] * 60
     )
+
+    # Evitar tiempos negativos
+    df.loc[df["Tiempo de captura agente"] < 0, "Tiempo de captura agente"] = None
+    df.loc[df["Tiempo de alta robot"] < 0, "Tiempo de alta robot"] = None
 
     # =========================
     # OTRAS TRANSFORMACIONES
@@ -147,6 +156,10 @@ def main():
     # SELECCIONAR COLUMNAS
     # =========================
     df_final = df[COLUMNAS_SALIDA].copy()
+
+    # Ordenar por fecha
+    if "Fecha" in df_final.columns:
+        df_final.sort_values("Fecha", inplace=True)
 
     # =========================
     # EXPORTAR EXCEL
