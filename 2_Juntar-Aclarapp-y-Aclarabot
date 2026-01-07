@@ -82,4 +82,118 @@ def main():
 
     logger.info(f"✓ Aclarabot cargado ({len(aclarabot_df)} filas)")
     logger.info(f"✓ Aclarapp cargado ({len(aclarapp_df)} filas)")
-    logger.info(f"✓ InfoAgentes cargado ({len
+    logger.info(f"✓ InfoAgentes cargado ({len(agentes_df)} filas)")
+
+    # -------------------------
+    # 2. DETECTAR COLUMNAS CLAVE
+    # -------------------------
+
+    col_aclarabot_id = buscar_columna(aclarabot_df, ["ACLARACIONID"])
+    col_aclarapp_id = buscar_columna(aclarapp_df, ["ACLARACION", "ID"])
+    col_registro_bot = buscar_columna(aclarabot_df, ["NUMERO_DE_REGISTRO", "REGISTRO"])
+    col_registro_app = buscar_columna(aclarapp_df, ["REGISTRO"])
+    col_agente_id = buscar_columna(agentes_df, ["ID"])
+
+    # -------------------------
+    # 3. RENOMBRAR CIS DUPLICADO
+    # -------------------------
+
+    if "CIS" in aclarapp_df.columns:
+        aclarapp_df.rename(columns={"CIS": "CIS_2"}, inplace=True)
+
+    # -------------------------
+    # 4. MERGE ACLARABOT + ACLARAPP
+    # -------------------------
+
+    merge_1 = aclarabot_df.merge(
+        aclarapp_df,
+        how="left",
+        left_on=col_aclarabot_id,
+        right_on=col_aclarapp_id,
+        suffixes=("", "_APP")
+    )
+
+    # -------------------------
+    # 5. MERGE CON INFOAGENTES
+    # -------------------------
+
+    df_final = merge_1.merge(
+        agentes_df,
+        how="left",
+        left_on=col_registro_bot,
+        right_on=col_agente_id
+    )
+
+    # -------------------------
+    # 6. PARSEAR FECHAS
+    # -------------------------
+
+    columnas_fecha = [
+        "FECHA",
+        "FECHA_CREACION",
+        "FECHA_ENVIADO",
+        "FECHA_ASIGNACION",
+        "FECHA_ATENDIDO"
+    ]
+
+    for col in columnas_fecha:
+        if col in df_final.columns:
+            df_final[col] = df_final[col].apply(parsear_fecha)
+
+    if "FECHA" in df_final.columns:
+        df_final.sort_values(by="FECHA", inplace=True)
+
+    # -------------------------
+    # 7. FORZAR ENCABEZADOS FINALES
+    # -------------------------
+
+    COLUMNAS_FINALES = [
+        "ENTORNO",
+        "FECHA",
+        "TIPO_DE_TARJETA",
+        "TIPO_DE_ACLARACION",
+        "DETALLES_DE_ACLARACION",
+        "NUMERO_DE_REGISTRO",
+        "FOLIO_SCC",
+        "CIS",
+        "CARGOS",
+        "ROBOTID",
+        "ACLARACIONID",
+        "ESTATUS",
+        "DETALLES",
+        "ID_ACLARACION",
+        "REGISTRO",
+        "FOLIO",
+        "CIS_2",
+        "FECHA_CREACION",
+        "FECHA_ENVIADO",
+        "FECHA_ASIGNACION",
+        "FECHA_ATENDIDO",
+        "ESTADO_ACTUAL",
+        "INTENTOS",
+        "ACCIONES",
+        "ID",
+        "NOMBRE",
+        "SUPERVISOR",
+        "SITE",
+        "SKILL"
+    ]
+
+    for col in COLUMNAS_FINALES:
+        if col not in df_final.columns:
+            df_final[col] = ""
+
+    df_final = df_final[COLUMNAS_FINALES]
+
+    # -------------------------
+    # 8. EXPORTAR CSV
+    # -------------------------
+
+    salida = os.path.join(CARPETA, ARCHIVO_SALIDA)
+    df_final.to_csv(salida, index=False, encoding="utf-8-sig")
+
+    logger.info(f"✅ Archivo generado correctamente: {salida}")
+
+
+if __name__ == "__main__":
+    main()
