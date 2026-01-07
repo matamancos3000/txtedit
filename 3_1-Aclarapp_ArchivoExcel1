@@ -1,0 +1,169 @@
+import pandas as pd
+import logging
+from pathlib import Path
+from datetime import datetime
+import locale
+import re
+
+# =========================
+# LOGGING
+# =========================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+# =========================
+# CONFIGURACIÓN
+# =========================
+BASE_PATH = Path("c:/Copia-reporte-Aclarabot")
+EXCEL_PATH = BASE_PATH / "archivos_Excel"
+EXCEL_PATH.mkdir(exist_ok=True)
+
+# Buscar CSV acumulado
+CSV_FILE = next(BASE_PATH.glob("Acumulado_filtrado_*.csv"))
+
+# Configurar locale español (Windows)
+try:
+    locale.setlocale(locale.LC_TIME, "Spanish_Spain")
+except:
+    locale.setlocale(locale.LC_TIME, "es_ES")
+
+HOY = datetime.now()
+FECHA_TEXTO = HOY.strftime("%d-%B").capitalize()  # Ej: 7-Enero
+OUTPUT_FILE = EXCEL_PATH / f"Reporte_Aclarapp_{FECHA_TEXTO}.xlsx"
+
+# =========================
+# COLUMNAS
+# =========================
+COLUMNAS_SALIDA = [
+    "Fecha",
+    "Tipo de tarjeta",
+    "Tipo de aclaracion",
+    "Detalles de aclaracion",
+    "Cargos",
+    "RobotID",
+    "AclaracionID",
+    "Estatus",
+    "Registro",
+    "Folio",
+    "CIS_1",
+    "Fecha Creación",
+    "Fecha Enviado",
+    "Fecha Asignacion",
+    "Fecha Atendido",
+    "Tiempo de captura agente",
+    "Tiempo de alta robot",
+    "Tiempo de captura agente segundos",
+    "Tiempo de alta robot segundos",
+    "Numero de cargos",
+    "Nombre Agente",
+    "Supervisor",
+    "Site",
+    "Skill"
+]
+
+# =========================
+# FUNCIONES
+# =========================
+def convertir_fecha(df, columna):
+    if columna in df.columns:
+        df[columna] = pd.to_datetime(
+            df[columna],
+            format="%d/%m/%Y %H:%M:%S",
+            errors="coerce"
+        )
+
+def minutos_entre(fecha_fin, fecha_inicio):
+    return (fecha_fin - fecha_inicio).dt.total_seconds() / 60
+
+# =========================
+# MAIN
+# =========================
+def main():
+    logger.info("🚀 Generando Reporte Excel Aclarapp")
+
+    # =========================
+    # CARGA CSV
+    # =========================
+    df = pd.read_csv(CSV_FILE, dtype=str, encoding="utf-8-sig")
+    logger.info(f"✓ CSV cargado: {CSV_FILE.name} ({len(df)} filas)")
+
+    # =========================
+    # FILTRAR ESTATUS FALSE
+    # =========================
+    df = df[df["Estatus"] == "True"].copy()
+    logger.info(f"✓ Filtrado Estatus=True → {len(df)} filas")
+
+    # =========================
+    # CONVERTIR FECHAS
+    # =========================
+    columnas_fecha = [
+        "Fecha",
+        "Fecha Creación",
+        "Fecha Enviado",
+        "Fecha Asignacion",
+        "Fecha Atendido"
+    ]
+
+    for col in columnas_fecha:
+        convertir_fecha(df, col)
+
+    # =========================
+    # TIEMPOS
+    # =========================
+    df["Tiempo de captura agente"] = minutos_entre(
+        df["Fecha Enviado"], df["Fecha Creación"]
+    )
+
+    df["Tiempo de alta robot"] = minutos_entre(
+        df["Fecha"], df["Fecha Asignacion"]
+    )
+
+    df["Tiempo de captura agente segundos"] = (
+        df["Tiempo de captura agente"] * 60
+    )
+
+    df["Tiempo de alta robot segundos"] = (
+        df["Tiempo de alta robot"] * 60
+    )
+
+    # =========================
+    # OTRAS TRANSFORMACIONES
+    # =========================
+    df["Numero de cargos"] = pd.to_numeric(
+        df["Cargos"], errors="coerce"
+    )
+
+    df["Estatus"] = "Exitoso"
+
+    df.rename(
+        columns={"NOMBRE": "Nombre Agente"},
+        inplace=True
+    )
+
+    # =========================
+    # SELECCIONAR COLUMNAS
+    # =========================
+    df_final = df[COLUMNAS_SALIDA].copy()
+
+    # =========================
+    # EXPORTAR EXCEL
+    # =========================
+    logger.info(f"📤 Exportando Excel: {OUTPUT_FILE}")
+    df_final.to_excel(
+        OUTPUT_FILE,
+        index=False,
+        engine="openpyxl"
+    )
+
+    logger.info("✅ Reporte Excel generado correctamente")
+    logger.info(f"📊 Filas finales: {len(df_final)}")
+    logger.info(f"📁 Ubicación: {OUTPUT_FILE}")
+
+# =========================
+# EJECUCIÓN
+# =========================
+if __name__ == "__main__":
+    main()
