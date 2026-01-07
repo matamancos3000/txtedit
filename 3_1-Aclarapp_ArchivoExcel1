@@ -1,8 +1,9 @@
 import pandas as pd
 import logging
 from pathlib import Path
-from datetime import datetime
-import locale
+import re
+from datetime import datetime, timedelta
+import numpy as np
 
 # =========================
 # LOGGING
@@ -17,163 +18,490 @@ logger = logging.getLogger(__name__)
 # CONFIGURACIÓN
 # =========================
 BASE_PATH = Path("c:/Copia-reporte-Aclarabot")
-EXCEL_PATH = BASE_PATH / "archivos_Excel"
-EXCEL_PATH.mkdir(exist_ok=True)
 
-# Buscar CSV acumulado
-CSV_FILE = next(BASE_PATH.glob("Acumulado_filtrado_*.csv"))
+# Buscar archivo CSV filtrado
+CSV_PATTERN = "Acumulado_Filtrado_*.csv"
+ARCHIVO_CSV = None
+for archivo in BASE_PATH.glob(CSV_PATTERN):
+    ARCHIVO_CSV = archivo
+    break
 
-# Configurar locale español (Windows)
-try:
-    locale.setlocale(locale.LC_TIME, "Spanish_Spain")
-except:
-    try:
-        locale.setlocale(locale.LC_TIME, "es_ES")
-    except:
-        logger.warning("⚠️ No se pudo configurar locale en español")
+if ARCHIVO_CSV is None:
+    logger.error(f"No se encontró archivo {CSV_PATTERN} en {BASE_PATH}")
+    exit(1)
 
-HOY = datetime.now()
-FECHA_TEXTO = HOY.strftime("%d-%B").capitalize()  # Ej: 7-Enero
-OUTPUT_FILE = EXCEL_PATH / f"Reporte_Aclarapp_{FECHA_TEXTO}.xlsx"
+# Crear carpeta para archivos Excel
+EXCEL_FOLDER = BASE_PATH / "archivos_Excel"
+EXCEL_FOLDER.mkdir(exist_ok=True)
 
-# =========================
-# COLUMNAS
-# =========================
-COLUMNAS_SALIDA = [
-    "Fecha",
-    "Tipo de tarjeta",
-    "Tipo de aclaracion",
-    "Detalles de aclaracion",
-    "Cargos",
-    "RobotID",
-    "AclaracionID",
-    "Estatus",
-    "Registro",
-    "Folio",
-    "CIS",
-    "Fecha Creacion",
-    "Fecha Enviado",
-    "Fecha Asignacion",
-    "Fecha Atendido",
-    "Tiempo de captura agente",
-    "Tiempo de alta robot",
-    "Tiempo de captura agente segundos",
-    "Tiempo de alta robot segundos",
-    "Numero de cargos",
-    "Nombre Agente",
-    "Supervisor",
-    "Site",
-    "Skill"
-]
+# Nombre dinámico del archivo Excel (en español)
+meses_es = {
+    1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
+    5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
+    9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
+}
+fecha_hoy = datetime.now()
+NOMBRE_EXCEL = f"Reporte_Aclarapp_{fecha_hoy.day}-{meses_es[fecha_hoy.month]}.xlsx"
+RUTA_EXCEL = EXCEL_FOLDER / NOMBRE_EXCEL
 
 # =========================
 # FUNCIONES
 # =========================
-def convertir_fecha(df, columna):
-    if columna in df.columns:
-        df[columna] = pd.to_datetime(
-            df[columna],
-            dayfirst=True,
-            infer_datetime_format=True,
-            errors="coerce"
-        )
+def limpiar_formato_fecha_especial(valor):
+    """
+    Limpia formato especial: dd/MM/yyyy hh:mm:ss p. m. (con espacio entre p. y m.)
+    y a. m.
+    """
+    if pd.isna(valor):
+        return valor
+    
+    valor_str = str(valor).strip()
+    
+    if not valor_str or valor_str.lower() in ['nan', 'nat', 'null', 'none', '']:
+        return valor
+    
+    # Corregir el espacio entre p. y m. / a. y m.
+    valor_str = re.sub(r'p\.\s*m\.', 'PM', valor_str, flags=re.IGNORECASE)
+    valor_str = re.sub(r'a\.\s*m\.', 'AM', valor_str, flags=re.IGNORECASE)
+    
+    return valor_str.strip()
 
-def minutos_entre(fecha_fin, fecha_inicio):
-    return (fecha_fin - fecha_inicio).dt.total_seconds() / 60
+def parsear_fecha(fecha_str):
+    """Convierte string de fecha a datetime"""
+    if pd.isna(fecha_str):
+        return pd.NaT
+    
+    # Limpiar formato especial
+    fecha_limpia = limpiar_formato_fecha_especial(fecha_str)
+    
+    # Intentar parsear
+    try:
+        return pd.to_datetime(fecha_limpia, format="%d/%m/%Y %I:%M:%S %p", errors='coerce')
+    except:
+        return pd.to_datetime(fecha_limpia, dayfirst=True, errors='coerce')
+
+def calcular_tiempo_minutos(fecha_inicio, fecha_fin):
+    """Calcula diferencia en minutos entre dos fechas"""
+    if pd.isna(fecha_inicio) or pd.isna(fecha_fin):
+        return np.nan
+    
+    try:
+        diferencia = fecha_fin - fecha_inicio
+        return diferencia.total_seconds() / 60  # Convertir a minutos
+    except:
+        return np.nan
+
+def crear_formato_excel(writer, df_resumen):
+    """Aplica formato al archivo Excel"""
+    workbook = writer.book
+    
+    # Formato para encabezados
+    header_format = workbook.add_format({
+        'bold': True,
+        'text_wrap': True,
+        'valign': 'top',
+        'fg_color': '#4472C4',
+        'font_color': 'white',
+        'border': 1,
+        'align': 'center'
+    })
+    
+    # Formato para datos
+    data_format = workbook.add_format({
+        'border': 1,
+        'align': 'center'
+    })
+    
+    # Formato para números
+    number_format = workbook.add_format({
+        'border': 1,
+        'align': 'center',
+        'num_format': '#,##0'
+    })
+    
+    # Formato para decimales
+    decimal_format = workbook.add_format({
+        'border': 1,
+        'align': 'center',
+        'num_format': '#,##0.00'
+    })
+    
+    # Formato para fechas
+    date_format = workbook.add_format({
+        'border': 1,
+        'align': 'center',
+        'num_format': 'dd/mm/yyyy hh:mm:ss'
+    })
+    
+    # Formato para tiempo
+    time_format = workbook.add_format({
+        'border': 1,
+        'align': 'center',
+        'num_format': '[h]:mm:ss'
+    })
+    
+    # Aplicar formatos a cada hoja
+    for sheet_name in writer.sheets:
+        worksheet = writer.sheets[sheet_name]
+        
+        # Aplicar formato a encabezados
+        for col_num, value in enumerate(df_resumen.columns.values):
+            worksheet.write(0, col_num, value, header_format)
+            
+            # Ajustar ancho de columnas
+            max_length = max(df_resumen[value].astype(str).map(len).max(), len(value)) + 2
+            worksheet.set_column(col_num, col_num, min(max_length, 30))
+        
+        # Aplicar formatos a datos
+        for row in range(1, len(df_resumen) + 1):
+            for col_num, col_name in enumerate(df_resumen.columns):
+                cell_value = df_resumen.iat[row-1, col_num]
+                
+                # Determinar formato según tipo de dato
+                if pd.isna(cell_value):
+                    worksheet.write(row, col_num, '', data_format)
+                elif 'Fecha' in col_name or 'fecha' in col_name.lower():
+                    if pd.notna(cell_value) and isinstance(cell_value, (pd.Timestamp, datetime)):
+                        worksheet.write_datetime(row, col_num, cell_value, date_format)
+                    else:
+                        worksheet.write(row, col_num, cell_value, data_format)
+                elif 'Tiempo' in col_name and 'segundos' not in col_name.lower():
+                    if pd.notna(cell_value):
+                        # Convertir minutos a formato tiempo de Excel
+                        tiempo_excel = cell_value / 1440  # 1440 minutos en un día
+                        worksheet.write_number(row, col_num, tiempo_excel, time_format)
+                    else:
+                        worksheet.write(row, col_num, '', data_format)
+                elif 'segundos' in col_name.lower():
+                    if pd.notna(cell_value):
+                        worksheet.write_number(row, col_num, cell_value, number_format)
+                    else:
+                        worksheet.write(row, col_num, '', data_format)
+                elif any(x in str(col_name).lower() for x in ['cargos', 'intentos', 'folio', 'cis']):
+                    if pd.notna(cell_value):
+                        try:
+                            worksheet.write_number(row, col_num, float(cell_value), number_format)
+                        except:
+                            worksheet.write(row, col_num, cell_value, data_format)
+                    else:
+                        worksheet.write(row, col_num, '', data_format)
+                else:
+                    worksheet.write(row, col_num, cell_value, data_format)
+
+def crear_graficas(writer, df):
+    """Crea gráficas en hojas separadas"""
+    workbook = writer.book
+    
+    # =========================
+    # HOJA: Resumen General
+    # =========================
+    worksheet_resumen = workbook.add_worksheet('Resumen General')
+    
+    # Estadísticas básicas
+    stats = [
+        ['Total de registros', len(df)],
+        ['Registros exitosos', df['Estatus'].eq('exitoso').sum()],
+        ['Agentes involucrados', df['Nombre Agente'].nunique()],
+        ['Tipos de aclaración', df['Tipo de aclaracion'].nunique()],
+        ['Tiempo promedio captura (min)', df['Tiempo de captura agente'].mean()],
+        ['Tiempo promedio alta robot (min)', df['Tiempo de alta robot'].mean()],
+        ['Cargos totales', df['Cargos'].astype(float).sum() if df['Cargos'].notna().any() else 0]
+    ]
+    
+    for i, (label, value) in enumerate(stats):
+        worksheet_resumen.write(i, 0, label)
+        if isinstance(value, float):
+            worksheet_resumen.write(i, 1, value, workbook.add_format({'num_format': '#,##0.00'}))
+        else:
+            worksheet_resumen.write(i, 1, value)
+    
+    # =========================
+    # HOJA: Gráfica 1 - Aclaraciones por Agente
+    # =========================
+    worksheet_graf1 = workbook.add_worksheet('Gráficas')
+    
+    # Datos para gráfica de aclaraciones por agente
+    aclaraciones_por_agente = df['Nombre Agente'].value_counts().head(10)
+    
+    worksheet_graf1.write(0, 0, 'Agente')
+    worksheet_graf1.write(0, 1, 'Cantidad de Aclaraciones')
+    
+    for i, (agente, cantidad) in enumerate(aclaraciones_por_agente.items(), start=1):
+        worksheet_graf1.write(i, 0, agente)
+        worksheet_graf1.write(i, 1, cantidad)
+    
+    # Crear gráfica
+    chart1 = workbook.add_chart({'type': 'column'})
+    chart1.add_series({
+        'name': 'Aclaraciones por Agente',
+        'categories': ['Gráficas', 1, 0, len(aclaraciones_por_agente), 0],
+        'values': ['Gráficas', 1, 1, len(aclaraciones_por_agente), 1],
+        'data_labels': {'value': True},
+        'fill': {'color': '#4472C4'}
+    })
+    
+    chart1.set_title({'name': 'Top 10 Agentes por Aclaraciones'})
+    chart1.set_x_axis({'name': 'Agente'})
+    chart1.set_y_axis({'name': 'Cantidad de Aclaraciones'})
+    chart1.set_style(11)
+    
+    worksheet_graf1.insert_chart('D2', chart1, {'x_offset': 25, 'y_offset': 10})
+    
+    # =========================
+    # Gráfica 2 - Tipos de Aclaración
+    # =========================
+    tipos_aclaracion = df['Tipo de aclaracion'].value_counts()
+    
+    start_row = len(aclaraciones_por_agente) + 5
+    worksheet_graf1.write(start_row, 0, 'Tipo de Aclaración')
+    worksheet_graf1.write(start_row, 1, 'Cantidad')
+    
+    for i, (tipo, cantidad) in enumerate(tipos_aclaracion.items(), start=1):
+        worksheet_graf1.write(start_row + i, 0, tipo)
+        worksheet_graf1.write(start_row + i, 1, cantidad)
+    
+    chart2 = workbook.add_chart({'type': 'pie'})
+    chart2.add_series({
+        'name': 'Tipos de Aclaración',
+        'categories': ['Gráficas', start_row + 1, 0, start_row + len(tipos_aclaracion), 0],
+        'values': ['Gráficas', start_row + 1, 1, start_row + len(tipos_aclaracion), 1],
+        'data_labels': {'percentage': True, 'leader_lines': True}
+    })
+    
+    chart2.set_title({'name': 'Distribución por Tipo de Aclaración'})
+    chart2.set_style(10)
+    
+    worksheet_graf1.insert_chart('D20', chart2, {'x_offset': 25, 'y_offset': 10})
+    
+    # =========================
+    # Gráfica 3 - Tiempos Promedio por Agente
+    # =========================
+    tiempos_por_agente = df.groupby('Nombre Agente').agg({
+        'Tiempo de captura agente': 'mean',
+        'Tiempo de alta robot': 'mean'
+    }).head(10)
+    
+    start_row += len(tipos_aclaracion) + 5
+    worksheet_graf1.write(start_row, 0, 'Agente')
+    worksheet_graf1.write(start_row, 1, 'Tiempo Captura Prom (min)')
+    worksheet_graf1.write(start_row, 2, 'Tiempo Alta Robot Prom (min)')
+    
+    for i, (agente, row) in enumerate(tiempos_por_agente.iterrows(), start=1):
+        worksheet_graf1.write(start_row + i, 0, agente)
+        worksheet_graf1.write(start_row + i, 1, row['Tiempo de captura agente'])
+        worksheet_graf1.write(start_row + i, 2, row['Tiempo de alta robot'])
+    
+    chart3 = workbook.add_chart({'type': 'column'})
+    chart3.add_series({
+        'name': 'Tiempo Captura',
+        'categories': ['Gráficas', start_row + 1, 0, start_row + len(tiempos_por_agente), 0],
+        'values': ['Gráficas', start_row + 1, 1, start_row + len(tiempos_por_agente), 1],
+        'fill': {'color': '#4472C4'}
+    })
+    
+    chart3.add_series({
+        'name': 'Tiempo Alta Robot',
+        'categories': ['Gráficas', start_row + 1, 0, start_row + len(tiempos_por_agente), 0],
+        'values': ['Gráficas', start_row + 1, 2, start_row + len(tiempos_por_agente), 2],
+        'fill': {'color': '#ED7D31'}
+    })
+    
+    chart3.set_title({'name': 'Tiempos Promedio por Agente (Top 10)'})
+    chart3.set_x_axis({'name': 'Agente'})
+    chart3.set_y_axis({'name': 'Minutos'})
+    chart3.set_style(12)
+    
+    worksheet_graf1.insert_chart('D35', chart3, {'x_offset': 25, 'y_offset': 10})
 
 # =========================
 # MAIN
 # =========================
 def main():
-    logger.info("🚀 Generando Reporte Excel Aclarapp")
-
+    logger.info("🚀 Iniciando generación de reporte Excel")
+    logger.info(f"📂 Archivo fuente: {ARCHIVO_CSV.name}")
+    logger.info(f"📊 Archivo destino: {NOMBRE_EXCEL}")
+    
     # =========================
-    # CARGA CSV
+    # 1. CARGAR DATOS
     # =========================
-    df = pd.read_csv(CSV_FILE, dtype=str, encoding="utf-8-sig")
-    logger.info(f"✓ CSV cargado: {CSV_FILE.name} ({len(df)} filas)")
-
+    logger.info("📥 Cargando datos del CSV...")
+    df = pd.read_csv(ARCHIVO_CSV, dtype=str, encoding='utf-8-sig')
+    
+    logger.info(f"  Filas originales: {len(df)}")
+    logger.info(f"  Columnas originales: {list(df.columns)}")
+    
     # =========================
-    # FILTRAR ESTATUS FALSE
+    # 2. FILTRAR POR STATUS
     # =========================
-    df = df[df["Estatus"] == "True"].copy()
-    logger.info(f"✓ Filtrado Estatus=True → {len(df)} filas")
-
+    logger.info("🔍 Filtrando datos (eliminando Estatus = False)...")
+    if 'Estatus' in df.columns:
+        df = df[df['Estatus'] != 'False']
+        logger.info(f"  Filas después de filtrar: {len(df)}")
+    else:
+        logger.warning("  Columna 'Estatus' no encontrada, continuando sin filtrar")
+    
     # =========================
-    # CONVERTIR FECHAS
+    # 3. SELECCIONAR Y RENOMBRAR COLUMNAS
     # =========================
-    columnas_fecha = [
-        "Fecha",
-        "Fecha Creacion",
-        "Fecha Enviado",
-        "Fecha Asignacion",
-        "Fecha Atendido"
+    logger.info("📋 Seleccionando y renombrando columnas...")
+    
+    columnas_necesarias = [
+        'Fecha', 'Tipo de tarjeta', 'Tipo de aclaracion', 'Detalles de aclaracion',
+        'Cargos', 'RobotID', 'AclaracionID', 'Estatus', 'Registro', 'Folio',
+        'CIS_1', 'Fecha Creación', 'Fecha Enviado', 'Fecha Asignacion', 'Fecha Atendido',
+        'NOMBRE', 'Supervisor', 'Site', 'Skill'
     ]
-
+    
+    # Verificar qué columnas están disponibles
+    columnas_disponibles = [col for col in columnas_necesarias if col in df.columns]
+    columnas_faltantes = [col for col in columnas_necesarias if col not in df.columns]
+    
+    if columnas_faltantes:
+        logger.warning(f"  Columnas faltantes: {columnas_faltantes}")
+    
+    df = df[columnas_disponibles].copy()
+    
+    # =========================
+    # 4. PROCESAR FECHAS
+    # =========================
+    logger.info("⏰ Procesando fechas...")
+    
+    columnas_fecha = ['Fecha', 'Fecha Creación', 'Fecha Enviado', 'Fecha Asignacion', 'Fecha Atendido']
+    
     for col in columnas_fecha:
-        convertir_fecha(df, col)
-        validas = df[col].notna().sum()
-        logger.info(f"📅 {col}: {validas}/{len(df)} fechas válidas")
-
+        if col in df.columns:
+            logger.info(f"  Procesando {col}...")
+            df[col] = df[col].apply(parsear_fecha)
+    
     # =========================
-    # TIEMPOS
+    # 5. CALCULAR TIEMPOS
     # =========================
-    df["Tiempo de captura agente"] = minutos_entre(
-        df["Fecha Enviado"], df["Fecha Creacion"]
-    ).round(2)
-
-    df["Tiempo de alta robot"] = minutos_entre(
-        df["Fecha"], df["Fecha Asignacion"]
-    ).round(2)
-
-    df["Tiempo de captura agente segundos"] = (
-        df["Tiempo de captura agente"] * 60
-    )
-
-    df["Tiempo de alta robot segundos"] = (
-        df["Tiempo de alta robot"] * 60
-    )
-
-    # Evitar tiempos negativos
-    df.loc[df["Tiempo de captura agente"] < 0, "Tiempo de captura agente"] = None
-    df.loc[df["Tiempo de alta robot"] < 0, "Tiempo de alta robot"] = None
-
+    logger.info("⏱️ Calculando tiempos...")
+    
+    # Tiempo de captura agente (Fecha Enviado - Fecha Creación) en minutos
+    if 'Fecha Enviado' in df.columns and 'Fecha Creación' in df.columns:
+        df['Tiempo de captura agente'] = df.apply(
+            lambda row: calcular_tiempo_minutos(row['Fecha Creación'], row['Fecha Enviado']), axis=1
+        )
+        logger.info(f"  Tiempo de captura agente calculado")
+    
+    # Tiempo de alta robot (Fecha - Fecha Asignacion) en minutos
+    if 'Fecha' in df.columns and 'Fecha Asignacion' in df.columns:
+        df['Tiempo de alta robot'] = df.apply(
+            lambda row: calcular_tiempo_minutos(row['Fecha Asignacion'], row['Fecha']), axis=1
+        )
+        logger.info(f"  Tiempo de alta robot calculado")
+    
+    # Convertir a segundos
+    if 'Tiempo de captura agente' in df.columns:
+        df['Tiempo de captura agente segundos'] = df['Tiempo de captura agente'] * 60
+    
+    if 'Tiempo de alta robot' in df.columns:
+        df['Tiempo de alta robot segundos'] = df['Tiempo de alta robot'] * 60
+    
+    # Contar número de cargos (suponiendo que es numérico)
+    if 'Cargos' in df.columns:
+        try:
+            df['Numero de cargos'] = pd.to_numeric(df['Cargos'], errors='coerce').fillna(0)
+        except:
+            df['Numero de cargos'] = 0
+        logger.info(f"  Número de cargos calculado")
+    
     # =========================
-    # OTRAS TRANSFORMACIONES
+    # 6. RENOMBRAR COLUMNAS
     # =========================
-    df["Numero de cargos"] = pd.to_numeric(
-        df["Cargos"], errors="coerce"
-    )
-
-    df["Estatus"] = "Exitoso"
-
-    df.rename(
-        columns={"NOMBRE": "Nombre Agente"},
-        inplace=True
-    )
-
+    logger.info("🏷️ Renombrando columnas...")
+    
+    if 'NOMBRE' in df.columns:
+        df = df.rename(columns={'NOMBRE': 'Nombre Agente'})
+        logger.info("  'NOMBRE' renombrado a 'Nombre Agente'")
+    
+    if 'Estatus' in df.columns:
+        df['Estatus'] = df['Estatus'].replace({'True': 'exitoso'})
+        logger.info("  'Estatus' actualizado (True -> exitoso)")
+    
     # =========================
-    # SELECCIONAR COLUMNAS
+    # 7. REORDENAR COLUMNAS FINALES
     # =========================
-    df_final = df[COLUMNAS_SALIDA].copy()
-
-    # Ordenar por fecha
-    if "Fecha" in df_final.columns:
-        df_final.sort_values("Fecha", inplace=True)
-
+    logger.info("📊 Estructurando columnas finales...")
+    
+    columnas_finales = [
+        'Fecha', 'Tipo de tarjeta', 'Tipo de aclaracion', 'Detalles de aclaracion',
+        'Cargos', 'RobotID', 'AclaracionID', 'Estatus', 'Registro', 'Folio',
+        'CIS_1', 'Fecha Creación', 'Fecha Enviado', 'Fecha Asignacion', 'Fecha Atendido',
+        'Tiempo de captura agente', 'Tiempo de alta robot',
+        'Tiempo de captura agente segundos', 'Tiempo de alta robot segundos',
+        'Numero de cargos', 'Nombre Agente', 'Supervisor', 'Site', 'Skill'
+    ]
+    
+    # Solo mantener columnas que existen
+    columnas_finales_existentes = [col for col in columnas_finales if col in df.columns]
+    df = df[columnas_finales_existentes]
+    
+    logger.info(f"  Columnas finales: {columnas_finales_existentes}")
+    logger.info(f"  Filas finales: {len(df)}")
+    
     # =========================
-    # EXPORTAR EXCEL
+    # 8. ELIMINAR ARCHIVOS EXCEL ANTERIORES
     # =========================
-    logger.info(f"📤 Exportando Excel: {OUTPUT_FILE}")
-    df_final.to_excel(
-        OUTPUT_FILE,
-        index=False,
-        engine="openpyxl"
-    )
-
-    logger.info("✅ Reporte Excel generado correctamente")
-    logger.info(f"📊 Filas finales: {len(df_final)}")
-    logger.info(f"📁 Ubicación: {OUTPUT_FILE}")
+    logger.info("🗑️ Limpiando archivos Excel anteriores...")
+    
+    # Eliminar archivos de días anteriores (mantener solo el de hoy)
+    for archivo_excel in EXCEL_FOLDER.glob("Reporte_Aclarapp_*.xlsx"):
+        if archivo_excel.name != NOMBRE_EXCEL:
+            try:
+                archivo_excel.unlink()
+                logger.info(f"  Eliminado: {archivo_excel.name}")
+            except Exception as e:
+                logger.warning(f"  No se pudo eliminar {archivo_excel.name}: {e}")
+    
+    # =========================
+    # 9. CREAR ARCHIVO EXCEL
+    # =========================
+    logger.info(f"💾 Creando archivo Excel: {RUTA_EXCEL}")
+    
+    with pd.ExcelWriter(RUTA_EXCEL, engine='xlsxwriter') as writer:
+        # Hoja principal con datos
+        df.to_excel(writer, sheet_name='Datos', index=False)
+        logger.info("  ✅ Hoja 'Datos' creada")
+        
+        # Aplicar formato
+        logger.info("  🎨 Aplicando formato...")
+        crear_formato_excel(writer, df)
+        
+        # Crear gráficas
+        logger.info("  📈 Creando gráficas...")
+        crear_graficas(writer, df)
+        
+        logger.info("  ✅ Gráficas creadas")
+    
+    logger.info("✅ Reporte Excel generado exitosamente")
+    logger.info(f"📄 Archivo: {RUTA_EXCEL}")
+    logger.info(f"📊 Total registros en reporte: {len(df)}")
+    
+    # =========================
+    # 10. RESUMEN FINAL
+    # =========================
+    logger.info("\n" + "="*50)
+    logger.info("📋 RESUMEN FINAL DEL REPORTE")
+    logger.info("="*50)
+    
+    if 'Estatus' in df.columns:
+        exitosos = df['Estatus'].eq('exitoso').sum()
+        logger.info(f"Registros exitosos: {exitosos}/{len(df)}")
+    
+    if 'Nombre Agente' in df.columns:
+        logger.info(f"Agentes únicos: {df['Nombre Agente'].nunique()}")
+    
+    if 'Tiempo de captura agente' in df.columns:
+        tiempo_prom_captura = df['Tiempo de captura agente'].mean()
+        logger.info(f"Tiempo promedio de captura: {tiempo_prom_captura:.2f} minutos")
+    
+    if 'Tiempo de alta robot' in df.columns:
+        tiempo_prom_alta = df['Tiempo de alta robot'].mean()
+        logger.info(f"Tiempo promedio de alta robot: {tiempo_prom_alta:.2f} minutos")
+    
+    logger.info("="*50)
 
 # =========================
 # EJECUCIÓN
