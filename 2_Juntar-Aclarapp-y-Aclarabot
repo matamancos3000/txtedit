@@ -45,38 +45,6 @@ def cargar_csv(ruta, sep=","):
     df = df.apply(lambda col: col.str.strip() if col.dtype == "object" else col)
     return df
 
-def normalizar_fecha_12h_a_24h(fecha_str):
-    """
-    Convierte fecha con formato 12h (p.m./a.m. o PM/AM) a formato 24h
-    """
-    if pd.isna(fecha_str) or fecha_str == '' or fecha_str == 'nan':
-        return fecha_str
-    
-    fecha_str = str(fecha_str).strip()
-    
-    # Normalizar AM/PM (manejar p.m., pm, P.M., PM, etc.)
-    # Primero extraer la parte de AM/PM
-    patron_am_pm = r'\s*([ap]\.?m\.?)\s*$'
-    match = re.search(patron_am_pm, fecha_str, re.IGNORECASE)
-    
-    if match:
-        am_pm = match.group(1).upper()
-        # Quitar el AM/PM del string original
-        fecha_sin_ampm = re.sub(patron_am_pm, '', fecha_str, flags=re.IGNORECASE).strip()
-        
-        # Convertir AM/PM a formato estándar
-        if 'A' in am_pm.upper():
-            am_pm_std = 'AM'
-        elif 'P' in am_pm.upper():
-            am_pm_std = 'PM'
-        else:
-            am_pm_std = 'AM'  # Por defecto
-            
-        # Reconstruir con formato estándar
-        fecha_str = f"{fecha_sin_ampm} {am_pm_std}"
-    
-    return fecha_str
-
 # =========================
 # MAIN
 # =========================
@@ -88,6 +56,12 @@ def main():
     # =========================
     aclarabot_df = cargar_csv(ACLARABOT_PATH)
     logger.info(f"✓ Aclarabot cargado: {ACLARABOT_PATH.name} ({len(aclarabot_df)} filas)")
+    
+    # DEBUG: Mostrar primeras filas y formato de fecha
+    if "Fecha" in aclarabot_df.columns:
+        logger.info(f"  Ejemplos de formato 'Fecha' en Aclarabot:")
+        for i in range(min(3, len(aclarabot_df))):
+            logger.info(f"    Fila {i}: {aclarabot_df['Fecha'].iloc[i]}")
 
     aclarapp_df = cargar_csv(ACLARAPP_PATH, sep="|")
     logger.info(f"✓ Aclarapp cargado ({len(aclarapp_df)} filas)")
@@ -149,37 +123,82 @@ def main():
             logger.info(f"  Procesando columna: {col}")
             
             # Contar valores no nulos antes
-            valores_no_nulos = df_final[col].notna().sum()
-            logger.info(f"    Valores a procesar: {valores_no_nulos}")
+            valores_originales = df_final[col].notna().sum()
+            logger.info(f"    Valores no nulos originales: {valores_originales}")
             
-            # Normalizar formato 12h a estándar
-            df_final[col] = df_final[col].apply(normalizar_fecha_12h_a_24h)
+            if valores_originales > 0:
+                # Mostrar algunos ejemplos del formato original
+                ejemplos = df_final[col].dropna().head(3).tolist()
+                logger.info(f"    Ejemplos de formato original: {ejemplos}")
             
-            # Convertir a datetime con formato de 12 horas
+            # PRIMERO: Limpiar y normalizar el formato
+            # 1. Reemplazar puntos por dos puntos en la parte de tiempo (hh.mm.ss -> hh:mm:ss)
+            def limpiar_formato_fecha(valor):
+                if pd.isna(valor):
+                    return valor
+                
+                valor_str = str(valor).strip()
+                
+                # Si el valor ya está vacío, regresar
+                if not valor_str or valor_str.lower() in ['nan', 'nat', 'null', 'none']:
+                    return valor
+                
+                # Reemplazar puntos por dos puntos SOLO en la parte de tiempo
+                # Patrón: dígitos.dígitos.dígitos (hh.mm.ss)
+                if '.' in valor_str:
+                    # Separar por espacios
+                    partes = valor_str.split()
+                    if len(partes) >= 2:
+                        # Buscar la parte que tiene dígitos.puntos.dígitos
+                        for i, parte in enumerate(partes):
+                            if re.match(r'\d{1,2}\.\d{1,2}\.\d{1,2}', parte):
+                                # Reemplazar puntos por dos puntos
+                                partes[i] = parte.replace('.', ':')
+                                break
+                    
+                        # Unir de nuevo
+                        valor_str = ' '.join(partes)
+                
+                # 2. Normalizar AM/PM (p.m. -> PM, a.m. -> AM)
+                valor_str = re.sub(r'\bp\.?m\.?\b', 'PM', valor_str, flags=re.IGNORECASE)
+                valor_str = re.sub(r'\ba\.?m\.?\b', 'AM', valor_str, flags=re.IGNORECASE)
+                
+                return valor_str
+            
+            # Aplicar limpieza
+            df_final[col] = df_final[col].apply(limpiar_formato_fecha)
+            
+            # SEGUNDO: Convertir a datetime
             try:
-                # Intentar con formato específico primero
+                # Intentar varios formatos
                 df_final[col] = pd.to_datetime(
                     df_final[col],
-                    format="%d/%m/%Y %I:%M:%S %p",  # %I para 12h, %p para AM/PM
+                    format="%d/%m/%Y %I:%M:%S %p",  # Formato con AM/PM
                     errors="coerce"
                 )
-            except:
-                # Si falla, intentar inferir el formato
-                df_final[col] = pd.to_datetime(
-                    df_final[col],
-                    dayfirst=True,  # Importante para dd/mm/yyyy
-                    errors="coerce"
-                )
+                
+                # Si no funciona, intentar sin formato específico
+                if df_final[col].isna().all() or df_final[col].isna().sum() == valores_originales:
+                    logger.info(f"    Intentando parseo automático...")
+                    df_final[col] = pd.to_datetime(
+                        df_final[col],
+                        dayfirst=True,  # Importante para dd/mm/yyyy
+                        errors="coerce"
+                    )
+                
+            except Exception as e:
+                logger.error(f"    Error convirtiendo {col}: {e}")
+                df_final[col] = pd.to_datetime(df_final[col], errors="coerce")
             
             # Verificar conversión
             nulos = df_final[col].isna().sum()
-            convertidas = valores_no_nulos - nulos
-            logger.info(f"    Fechas convertidas: {convertidas}/{valores_no_nulos}")
+            convertidas = valores_originales - nulos
+            logger.info(f"    Fechas convertidas: {convertidas}/{valores_originales}")
             
             if nulos > 0 and nulos < 10:
                 # Mostrar algunas fechas problemáticas
-                ejemplos = df_final.loc[df_final[col].isna(), col].head(3).tolist()
-                logger.warning(f"    Ejemplos de fechas no convertidas: {ejemplos}")
+                fechas_problematicas = df_final.loc[df_final[col].isna(), col].head(5).tolist()
+                logger.warning(f"    Ejemplos de fechas no convertidas: {fechas_problematicas}")
 
     # =========================
     # ORDENAR POR FECHA (de más antigua a más actual)
@@ -187,32 +206,41 @@ def main():
     if "Fecha" in df_final.columns:
         logger.info(f"📅 Ordenando por columna 'Fecha' (de más antigua a más actual)")
         
-        # Crear copia temporal para ordenar manteniendo nulos al final
-        df_final["_temp_orden"] = df_final["Fecha"]
+        # Verificar si tenemos fechas válidas
+        fechas_validas = df_final["Fecha"].notna().sum()
+        logger.info(f"  Fechas válidas para ordenar: {fechas_validas}/{len(df_final)}")
         
-        # Ordenar (los NaN/NaT van al final por defecto)
-        df_final.sort_values("_temp_orden", inplace=True, na_position="last")
-        
-        # Eliminar columna temporal
-        df_final.drop("_temp_orden", axis=1, inplace=True)
-        
-        # Verificar ordenamiento
-        if df_final["Fecha"].notna().sum() > 1:
-            primera_fecha = df_final["Fecha"].iloc[0]
-            ultima_fecha = df_final["Fecha"].iloc[-1]
+        if fechas_validas > 0:
+            # Crear copia temporal para ordenar
+            df_final["_temp_orden"] = df_final["Fecha"]
+            
+            # Ordenar (los NaN/NaT van al final por defecto)
+            df_final.sort_values("_temp_orden", inplace=True, na_position="last")
+            
+            # Eliminar columna temporal
+            df_final.drop("_temp_orden", axis=1, inplace=True)
+            
+            # Verificar ordenamiento
+            primera_fecha = df_final["Fecha"].iloc[0] if fechas_validas > 0 else None
+            ultima_fecha_valida_idx = df_final["Fecha"].last_valid_index()
+            ultima_fecha = df_final["Fecha"].loc[ultima_fecha_valida_idx] if ultima_fecha_valida_idx else None
+            
             logger.info(f"  Primera fecha: {primera_fecha}")
-            logger.info(f"  Última fecha: {ultima_fecha}")
+            logger.info(f"  Última fecha válida: {ultima_fecha}")
+        else:
+            logger.warning("  No hay fechas válidas para ordenar")
     else:
         logger.warning("⚠️ No se encontró columna 'Fecha' para ordenar")
 
     # =========================
     # FORMATEAR FECHAS PARA SALIDA (opcional)
     # =========================
-    # Si quieres que en el CSV salgan en formato dd/MM/YYYY HH:MM:SS
+    # Convertir a string con formato 24h para el CSV
     for col in columnas_fecha:
         if col in df_final.columns:
-            # Convertir a string con formato 24h
-            df_final[col] = df_final[col].dt.strftime("%d/%m/%Y %H:%M:%S")
+            # Formatear solo las fechas no nulas
+            mask = df_final[col].notna()
+            df_final.loc[mask, col] = df_final.loc[mask, col].dt.strftime("%d/%m/%Y %H:%M:%S")
 
     # =========================
     # EXPORTAR CSV
@@ -228,11 +256,11 @@ def main():
     logger.info(f"📊 Total filas: {len(df_final)}")
     
     # Resumen de columnas de fecha
-    logger.info("📅 Resumen de columnas de fecha:")
+    logger.info("📅 Resumen final de columnas de fecha:")
     for col in columnas_fecha:
         if col in df_final.columns:
             no_nulos = df_final[col].notna().sum()
-            logger.info(f"  {col}: {no_nulos}/{len(df_final)} valores")
+            logger.info(f"  {col}: {no_nulos}/{len(df_final)} valores no nulos")
 
 # =========================
 # EJECUCIÓN
