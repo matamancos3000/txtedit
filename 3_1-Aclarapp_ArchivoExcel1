@@ -23,7 +23,7 @@ EXCEL_PATH.mkdir(exist_ok=True)
 
 CSV_FILE = next(BASE_PATH.glob("Acumulado_filtrado_*.csv"))
 
-# Locale español para nombre del archivo
+# Locale español (solo para nombre del archivo)
 try:
     locale.setlocale(locale.LC_TIME, "Spanish_Spain")
 except:
@@ -67,25 +67,10 @@ COLUMNAS_SALIDA = [
 ]
 
 # =========================
-# FUNCIONES
-# =========================
-def convertir_fecha(df, columna):
-    """Convierte fechas con formato yyyy-MM-dd HH:mm:ss"""
-    if columna in df.columns:
-        df[columna] = pd.to_datetime(
-            df[columna],
-            format="%Y-%m-%d %H:%M:%S",
-            errors="coerce"
-        )
-
-def minutos_entre(fecha_fin, fecha_inicio):
-    return (fecha_fin - fecha_inicio).dt.total_seconds() / 60
-
-# =========================
 # MAIN
 # =========================
 def main():
-    logger.info("🚀 Generando Reporte Excel Aclarapp")
+    logger.info("🚀 Generando Reporte Excel Aclarapp (sin convertir fechas)")
 
     # =========================
     # CARGA CSV
@@ -112,42 +97,12 @@ def main():
             )
 
     # =========================
-    # CONVERTIR FECHAS
+    # CAMPOS DE TIEMPO VACÍOS (AÚN)
     # =========================
-    columnas_fecha = [
-        "Fecha",
-        "Fecha Creacion",
-        "Fecha Enviado",
-        "Fecha Asignacion",
-        "Fecha Atendido"
-    ]
-
-    for col in columnas_fecha:
-        convertir_fecha(df, col)
-        logger.info(f"📅 {col}: {df[col].notna().sum()} válidas")
-
-    # =========================
-    # CÁLCULO DE TIEMPOS
-    # =========================
-    df["Tiempo de captura agente"] = minutos_entre(
-        df["Fecha Enviado"], df["Fecha Creacion"]
-    ).round(2)
-
-    df["Tiempo de alta robot"] = minutos_entre(
-        df["Fecha"], df["Fecha Asignacion"]
-    ).round(2)
-
-    df["Tiempo de captura agente segundos"] = (
-        df["Tiempo de captura agente"] * 60
-    )
-
-    df["Tiempo de alta robot segundos"] = (
-        df["Tiempo de alta robot"] * 60
-    )
-
-    # Evitar tiempos negativos
-    df.loc[df["Tiempo de captura agente"] < 0, "Tiempo de captura agente"] = None
-    df.loc[df["Tiempo de alta robot"] < 0, "Tiempo de alta robot"] = None
+    df["Tiempo de captura agente"] = None
+    df["Tiempo de alta robot"] = None
+    df["Tiempo de captura agente segundos"] = None
+    df["Tiempo de alta robot segundos"] = None
 
     # =========================
     # OTRAS TRANSFORMACIONES
@@ -163,7 +118,6 @@ def main():
     # SELECCIÓN FINAL
     # =========================
     df_final = df[COLUMNAS_SALIDA].copy()
-    df_final.sort_values("Fecha", inplace=True)
 
     # =========================
     # EXPORTAR EXCEL
