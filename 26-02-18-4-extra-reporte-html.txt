@@ -18,65 +18,48 @@ def extraer_enlaces_htm(contenido, archivo_path):
     """
     enlaces_encontrados = []
     
-    # Patrón para encontrar href="..." y href='...' - CORREGIDO
-    patron_href = r'''href=(["'])([^"']+\.htm[l]?)(?:#[^"']*)?\1'''
+    # Patrón SIMPLE para encontrar href="..." y href='...' - SIN VERBOSE
+    # Busca href= seguido de comilla, luego cualquier cosa que termine en .htm o .html, y la comilla de cierre
+    patrones = [
+        r'href="([^"]+\.htm[l]?[^"]*)"',  # href con comillas dobles
+        r"href='([^']+\.htm[l]?[^']*)'",  # href con comillas simples
+        r'href=([^\s>]+\.htm[l]?)'         # href sin comillas
+    ]
     
-    # Patrón para encontrar href sin comillas
-    patron_href_sin_comillas = r'''href=([^\s>]+\.htm[l]?)'''
-    
-    # Buscar con comillas
-    matches = re.finditer(patron_href, contenido, flags=re.IGNORECASE | re.VERBOSE)
-    for match in matches:
-        enlace_completo = match.group(2)  # La URL
-        # Si tiene fragmento, lo separamos
-        if '#' in enlace_completo:
-            enlace_sin_fragmento, fragmento = enlace_completo.split('#', 1)
-        else:
-            enlace_sin_fragmento = enlace_completo
-            fragmento = ''
-        
-        # Intentar resolver la ruta completa
-        try:
-            ruta_resuelta = (archivo_path.parent / enlace_sin_fragmento).resolve()
-            existe = ruta_resuelta.exists()
-        except:
-            ruta_resuelta = None
-            existe = False
-        
-        enlaces_encontrados.append({
-            'enlace_original': enlace_completo,
-            'enlace_sin_fragmento': enlace_sin_fragmento,
-            'fragmento': fragmento,
-            'ruta_resuelta': str(ruta_resuelta) if ruta_resuelta else 'Error al resolver',
-            'existe': existe,
-            'tipo': 'con_comillas'
-        })
-    
-    # Buscar sin comillas
-    matches = re.finditer(patron_href_sin_comillas, contenido, flags=re.IGNORECASE | re.VERBOSE)
-    for match in matches:
-        enlace_completo = match.group(1)
-        if '#' in enlace_completo:
-            enlace_sin_fragmento, fragmento = enlace_completo.split('#', 1)
-        else:
-            enlace_sin_fragmento = enlace_completo
-            fragmento = ''
-        
-        try:
-            ruta_resuelta = (archivo_path.parent / enlace_sin_fragmento).resolve()
-            existe = ruta_resuelta.exists()
-        except:
-            ruta_resuelta = None
-            existe = False
-        
-        enlaces_encontrados.append({
-            'enlace_original': enlace_completo,
-            'enlace_sin_fragmento': enlace_sin_fragmento,
-            'fragmento': fragmento,
-            'ruta_resuelta': str(ruta_resuelta) if ruta_resuelta else 'Error al resolver',
-            'existe': existe,
-            'tipo': 'sin_comillas'
-        })
+    for patron in patrones:
+        matches = re.finditer(patron, contenido, flags=re.IGNORECASE)
+        for match in matches:
+            enlace_completo = match.group(1).strip()
+            
+            # Si tiene fragmento, lo separamos
+            if '#' in enlace_completo:
+                partes = enlace_completo.split('#', 1)
+                enlace_sin_fragmento = partes[0]
+                fragmento = partes[1] if len(partes) > 1 else ''
+            else:
+                enlace_sin_fragmento = enlace_completo
+                fragmento = ''
+            
+            # Intentar resolver la ruta completa
+            try:
+                ruta_resuelta = (archivo_path.parent / enlace_sin_fragmento).resolve()
+                existe = ruta_resuelta.exists()
+                ruta_resuelta_str = str(ruta_resuelta)
+            except Exception as e:
+                ruta_resuelta_str = f"Error al resolver: {str(e)}"
+                existe = False
+            
+            # Evitar duplicados
+            enlace_dict = {
+                'enlace_original': enlace_completo,
+                'enlace_sin_fragmento': enlace_sin_fragmento,
+                'fragmento': fragmento,
+                'ruta_resuelta': ruta_resuelta_str,
+                'existe': existe
+            }
+            
+            if enlace_dict not in enlaces_encontrados:
+                enlaces_encontrados.append(enlace_dict)
     
     return enlaces_encontrados
 
@@ -121,11 +104,10 @@ def generar_reportes():
             if html_file.is_file():
                 # Ignorar carpetas _archivos
                 if any(part.endswith('_archivos') for part in html_file.parts):
-                    print(f"⏭️  Ignorando (carpeta _archivos): {html_file.relative_to(CARPETA_RAIZ)}")
                     continue
                 
                 archivos_procesados += 1
-                print(f"\n📄 Procesando: {html_file.relative_to(CARPETA_RAIZ)}")
+                print(f"\r📄 Procesando archivo {archivos_procesados}: {html_file.name:<50}", end="")
                 
                 try:
                     # Intentar leer con diferentes codificaciones
@@ -134,13 +116,11 @@ def generar_reportes():
                         try:
                             with open(html_file, 'r', encoding=encoding) as f:
                                 contenido = f.read()
-                            print(f"   ✓ Codificación: {encoding}")
                             break
                         except UnicodeDecodeError:
                             continue
                     
                     if contenido is None:
-                        print(f"   ❌ No se pudo leer el archivo")
                         continue
                     
                     # Extraer enlaces
@@ -148,7 +128,6 @@ def generar_reportes():
                     
                     if enlaces:
                         archivos_con_enlaces += 1
-                        print(f"   ✓ {len(enlaces)} enlace(s) .htm encontrado(s)")
                         
                         for enlace in enlaces:
                             tipo_ruta = analizar_tipo_ruta(enlace['enlace_original'])
@@ -157,16 +136,14 @@ def generar_reportes():
                             enlace['tamaño_archivo'] = html_file.stat().st_size
                             enlace['fecha_modificacion'] = datetime.fromtimestamp(html_file.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
                             todos_los_enlaces.append(enlace)
-                    else:
-                        print(f"   ⚠️ No se encontraron enlaces .htm")
-                        
+                            
                 except Exception as e:
-                    print(f"   ❌ Error: {str(e)}")
+                    print(f"\n❌ Error en {html_file.name}: {str(e)}")
+    
+    print("\n")  # Nueva línea después del contador
     
     # ===== GENERAR CSV =====
-    print("\n" + "="*70)
-    print("📊 GENERANDO REPORTE CSV")
-    print("="*70)
+    print("📊 GENERANDO REPORTE CSV...")
     
     with open(REPORTE_CSV, 'w', newline='', encoding='utf-8-sig') as csvfile:
         fieldnames = [
@@ -177,7 +154,6 @@ def generar_reportes():
             'tipo_ruta',
             'ruta_resuelta',
             'existe',
-            'tipo',
             'tamaño_archivo',
             'fecha_modificacion'
         ]
@@ -188,7 +164,7 @@ def generar_reportes():
             writer.writerow(enlace)
     
     # ===== GENERAR TXT =====
-    print("📄 GENERANDO REPORTE TXT")
+    print("📄 GENERANDO REPORTE TXT...")
     
     with open(REPORTE_TXT, 'w', encoding='utf-8') as txtfile:
         txtfile.write("="*80 + "\n")
@@ -279,7 +255,7 @@ def generar_reportes():
 if __name__ == "__main__":
     resultados = generar_reportes()
     
-    # Preguntar si quiere ver los enlaces que podrían faltar
+    # Mostrar enlaces problemáticos
     if resultados:
         print("\n")
         print("="*70)
@@ -294,13 +270,23 @@ if __name__ == "__main__":
         
         if enlaces_problematicos:
             print(f"Se encontraron {len(enlaces_problematicos)} enlaces potencialmente problemáticos:")
-            for e in enlaces_problematicos[:10]:  # Mostrar primeros 10
-                print(f"\n📄 {e['archivo']}")
-                print(f"   → {e['enlace_original']}")
-                print(f"   → {e['tipo_ruta']}")
-                print(f"   → {'❌ No existe' if not e['existe'] else '⚠️ Con subida de nivel'}")
             
-            if len(enlaces_problematicos) > 10:
-                print(f"\n... y {len(enlaces_problematicos) - 10} más (revisa el CSV para ver todos)")
+            # Agrupar por tipo de problema
+            no_existen = [e for e in enlaces_problematicos if not e['existe']]
+            con_subida = [e for e in enlaces_problematicos if 'subida' in e['tipo_ruta'] and e['existe']]
+            
+            if no_existen:
+                print(f"\n❌ Enlaces a archivos que NO EXISTEN ({len(no_existen)}):")
+                for e in no_existen[:5]:
+                    print(f"   • {e['archivo']} -> {e['enlace_original']}")
+                if len(no_existen) > 5:
+                    print(f"     ... y {len(no_existen)-5} más")
+            
+            if con_subida:
+                print(f"\n⚠️ Enlaces con subida de nivel (../) ({len(con_subida)}):")
+                for e in con_subida[:5]:
+                    print(f"   • {e['archivo']} -> {e['enlace_original']}")
+                if len(con_subida) > 5:
+                    print(f"     ... y {len(con_subida)-5} más")
         else:
             print("✅ No se encontraron enlaces problemáticos")
