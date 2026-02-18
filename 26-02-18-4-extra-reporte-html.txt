@@ -18,20 +18,11 @@ def extraer_enlaces_htm(contenido, archivo_path):
     """
     enlaces_encontrados = []
     
-    # Patrón para encontrar href="..." y href='...'
-    patron_href = r'''
-        href=
-        (["\'])           # Comilla de apertura (grupo 1)
-        ([^"\']+\.htm[l]?) # La URL que contiene .htm o .html (grupo 2)
-        (?:#[^"\']*)?      # Posible fragmento (#ancla) - opcional
-        \1                 # Misma comilla de cierre
-    '''
+    # Patrón para encontrar href="..." y href='...' - CORREGIDO
+    patron_href = r'''href=(["'])([^"']+\.htm[l]?)(?:#[^"']*)?\1'''
     
-    # Patrón para encontrar href sin comillas (raro pero puede pasar)
-    patron_href_sin_comillas = r'''
-        href=
-        ([^\s>]+\.htm[l]?)  # URL sin comillas hasta espacio o >
-    '''
+    # Patrón para encontrar href sin comillas
+    patron_href_sin_comillas = r'''href=([^\s>]+\.htm[l]?)'''
     
     # Buscar con comillas
     matches = re.finditer(patron_href, contenido, flags=re.IGNORECASE | re.VERBOSE)
@@ -292,7 +283,7 @@ if __name__ == "__main__":
     if resultados:
         print("\n")
         print("="*70)
-        print("🔍 ENLCES QUE PODRÍAN FALTAR EN LA CONVERSIÓN")
+        print("🔍 ENLACES QUE PODRÍAN FALTAR EN LA CONVERSIÓN")
         print("="*70)
         
         # Filtrar enlaces que podrían ser problemáticos
