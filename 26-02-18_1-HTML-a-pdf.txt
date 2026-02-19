@@ -1,6 +1,5 @@
 import re
 from pathlib import Path
-import shutil
 import os
 import csv
 
@@ -15,118 +14,112 @@ LOG_CSV = CARPETA_RAIZ.parent / "log_cambios.csv"
 def convertir_enlaces(contenido, ruta_html):
     """
     Convierte enlaces dentro de un HTML:
-    - .htm/.html -> .pdf en SharePoint (absolutos, relativos, con ../)
-    - Documentos (docx,xlsx,..) -> si contienen 'calidad2021/Formatos2021/'
+    - HTML (.htm/.html) -> PDF en SharePoint
+    - Documentos -> carpeta de recursos
+    - Soporta enlaces absolutos, relativos, ../
+    - Soporta carpetas genéricas ../*/archivo.htm (dinámico)
     """
     cambios = []
 
     def reemplazar_enlace(match):
         comilla = match.group(1)
-        enlace = match.group(2)  # sin comillas
+        enlace = match.group(2)
         enlace_norm = enlace.replace("\\", "/")
 
         print(f"\n      🔍 Analizando enlace: {enlace_norm}")
 
-        # separar fragmento (#...) si existe
+        # ---------------- Fragmento (#...) ----------------
         if "#" in enlace_norm:
             ruta_sin_fragmento, fragmento = enlace_norm.split("#", 1)
-            print(f"         Fragmento detectado: #{fragmento}")
         else:
             ruta_sin_fragmento = enlace_norm
             fragmento = None
 
         nombre_base, extension = os.path.splitext(os.path.basename(ruta_sin_fragmento))
         extension = extension.lower()
-        
-        print(f"         Extensión detectada: {extension}")
 
-        # ----- Caso: .htm/.html -----
+        # ==================================================
+        # CASO: HTML
+        # ==================================================
         if extension in [".htm", ".html"]:
-            print(f"         Procesando enlace HTML...")
-            
-            # Caso 1: Ya contiene calidad2021/
+
+            # ----- CASO ESPECIAL: ../cualquier_carpeta/archivo.htm (DINÁMICO) -----
+            # Patrón mejorado para capturar cualquier carpeta después de ../
+            m = re.search(r'\.\./([^/]+)/(.+\.htm[l]?)$', ruta_sin_fragmento, flags=re.IGNORECASE)
+            if m:
+                carpeta_origen = m.group(1)  # Captura el nombre de la carpeta (ej: documentos_apoyo_uso_comun)
+                archivo = m.group(2)         # Captura el nombre del archivo
+                
+                print(f"         ✓ Caso especial dinámico: ../{carpeta_origen}/")
+                print(f"         📁 Carpeta origen detectada: {carpeta_origen}")
+                print(f"         📄 Archivo: {archivo}")
+
+                # Convertir a PDF y mantener la misma estructura de carpetas
+                ruta_relativa = Path(carpeta_origen) / Path(archivo).with_suffix(".pdf")
+                nuevo = f"{URL_SHAREPOINT}{ruta_relativa.as_posix()}"
+                
+                print(f"         ✓ Nueva URL: {nuevo}")
+                cambios.append((enlace, nuevo, f"HTML->PDF (../{carpeta_origen})"))
+                return f'href={comilla}{nuevo}{comilla}'
+
+            # ----- Caso 1: ya contiene calidad2021/ -----
             m = re.search(r'calidad2021/', ruta_sin_fragmento, flags=re.IGNORECASE)
             if m:
-                print(f"         ✓ Caso 1: contiene 'calidad2021/'")
                 suffix = ruta_sin_fragmento[m.end():]
                 ruta_relativa = Path(suffix).with_suffix(".pdf").as_posix()
                 nuevo = f"{URL_SHAREPOINT}{ruta_relativa}"
-                print(f"         ✓ Nuevo enlace: {nuevo}")
+                print(f"         ✓ Caso 1: contiene calidad2021/")
                 cambios.append((enlace, nuevo, "HTML->PDF"))
                 return f'href={comilla}{nuevo}{comilla}'
 
-            # Caso 2: Empieza con /
+            # ----- Caso 2: empieza con / -----
             if ruta_sin_fragmento.startswith("/"):
-                print(f"         ✓ Caso 2: empieza con '/'")
-                ruta_relativa = Path(ruta_sin_fragmento.lstrip("/")).with_suffix(".pdf").as_posix()
+                ruta_relativa = (
+                    Path(ruta_sin_fragmento.lstrip("/"))
+                    .with_suffix(".pdf")
+                    .as_posix()
+                )
                 nuevo = f"{URL_SHAREPOINT}{ruta_relativa}"
-                print(f"         ✓ Nuevo enlace: {nuevo}")
+                print(f"         ✓ Caso 2: empieza con /")
                 cambios.append((enlace, nuevo, "HTML->PDF (raiz)"))
                 return f'href={comilla}{nuevo}{comilla}'
 
-            # Caso 3: Enlaces relativos (incluyendo ../)
-            print(f"         🔧 Caso 3: intentando resolver ruta relativa...")
-            print(f"         📍 HTML actual: {ruta_html}")
-            print(f"         📍 Ruta del HTML padre: {ruta_html.parent}")
-            print(f"         📍 Enlace original (sin fragmento): {ruta_sin_fragmento}")
-            
+            # ----- Caso 3: rutas relativas normales -----
             try:
-                # Resolver la ruta completa basada en la ubicación del HTML actual
                 ruta_completa = (ruta_html.parent / ruta_sin_fragmento).resolve()
-                print(f"         📍 Ruta completa resuelta: {ruta_completa}")
+                print(f"         🔧 Caso 3: intentando resolver ruta...")
+                print(f"         📍 Ruta completa: {ruta_completa}")
                 
-                # Verificar si el archivo existe
-                if ruta_completa.exists():
-                    print(f"         ✅ El archivo existe en el sistema")
-                else:
-                    print(f"         ⚠️ El archivo NO existe en el sistema (pero puede ser una referencia válida)")
-                
-                # Verificar si está dentro de CARPETA_RAIZ
                 try:
                     rel = ruta_completa.relative_to(CARPETA_RAIZ)
-                    print(f"         📍 Ruta relativa a raíz: {rel}")
-                    
-                    # Convertir a PDF y crear URL de SharePoint
                     ruta_relativa = Path(rel).with_suffix(".pdf").as_posix()
                     nuevo = f"{URL_SHAREPOINT}{ruta_relativa}"
-                    
-                    # Identificar qué tipo de ruta relativa era
-                    if '..' in enlace:
-                        tipo = "HTML->PDF (con ../)"
-                        print(f"         🔍 Detectados {enlace.count('..')} niveles de '..'")
-                    else:
-                        tipo = "HTML->PDF (relativo)"
-                    
-                    print(f"         ✓ NUEVA URL: {nuevo}")
+
+                    tipo = "HTML->PDF (con ../)" if ".." in enlace else "HTML->PDF (relativo)"
+                    print(f"         ✓ Ruta resuelta: {rel}")
                     cambios.append((enlace, nuevo, tipo))
                     return f'href={comilla}{nuevo}{comilla}'
-                    
                 except ValueError:
-                    print(f"         ❌ El archivo está FUERA de CARPETA_RAIZ")
-                    print(f"         CARPETA_RAIZ: {CARPETA_RAIZ}")
-                    print(f"         Archivo: {ruta_completa}")
+                    print(f"         ⚠️ Fuera de CARPETA_RAIZ")
                     return match.group(0)
-                    
             except Exception as e:
-                print(f"         ❌ Error al resolver ruta: {str(e)}")
+                print(f"         ⚠️ Error resolviendo: {e}")
                 return match.group(0)
 
-        # ----- Caso: documentos (docx/pdf/xlsx/...) -----
+        # ==================================================
+        # CASO: DOCUMENTOS
+        # ==================================================
         elif extension in [".docx", ".pdf", ".xlsx", ".pptx", ".doc", ".xls", ".xlsm"]:
-            print(f"         Procesando documento...")
             m = re.search(r'calidad2021/formatos2021/', ruta_sin_fragmento, flags=re.IGNORECASE)
             if m:
-                print(f"         ✓ Documento con 'calidad2021/formatos2021/'")
                 suffix = ruta_sin_fragmento[m.end():]
                 nuevo = f"{URL_SHAREPOINT}{CARPETA_DE_RECURSOS}/{suffix}"
-                print(f"         ✓ Nuevo enlace: {nuevo}")
+                print(f"         ✓ Documento convertido")
                 cambios.append((enlace, nuevo, extension.upper().strip(".")))
                 return f'href={comilla}{nuevo}{comilla}'
             else:
-                print(f"         ⚠️ Documento sin 'calidad2021/formatos2021/', se deja igual")
-            return match.group(0)
+                print(f"         ⚠️ Documento sin calidad2021/formatos2021/")
 
-        print(f"         ⚠️ Extensión no manejada, se deja igual")
         return match.group(0)
 
     patron = r'''
@@ -135,49 +128,35 @@ def convertir_enlaces(contenido, ruta_html):
         ([^"\']+\.(?:htm[l]?|docx|pdf|xlsx|pptx|doc|xls|xlsm)(?:\#[^"']+)?)
         \1
     '''
-    print(f"\n   🔍 Buscando enlaces con patrón: href=... .htm/.html/.docx/.pdf/etc")
-    nuevo_contenido = re.sub(patron, reemplazar_enlace, contenido, flags=re.IGNORECASE | re.VERBOSE)
+
+    nuevo_contenido = re.sub(
+        patron,
+        reemplazar_enlace,
+        contenido,
+        flags=re.IGNORECASE | re.VERBOSE
+    )
+
     return nuevo_contenido, cambios
 
 
 def procesar_html(html_path):
-    """Lee un HTML y convierte enlaces."""
-    print(f"\n📖 Leyendo archivo: {html_path.name}")
-    encoding_detectado = 'utf-8'
     try:
-        with open(html_path, 'r', encoding='utf-8') as f:
-            contenido = f.read()
-        print(f"   ✓ Codificación UTF-8 detectada")
+        contenido = html_path.read_text(encoding="utf-8")
+        encoding = "utf-8"
+        print(f"   📖 Leyendo con UTF-8")
     except UnicodeDecodeError:
-        encoding_detectado = 'latin-1'
-        with open(html_path, 'r', encoding='latin-1') as f:
-            contenido = f.read()
-        print(f"   ✓ Codificación Latin-1 detectada")
+        contenido = html_path.read_text(encoding="latin-1")
+        encoding = "latin-1"
+        print(f"   📖 Leyendo con Latin-1")
 
     contenido_modificado, cambios = convertir_enlaces(contenido, html_path)
-    return contenido_modificado, encoding_detectado, cambios
-
-
-def copiar_estructura_segura(html_path):
-    """Verifica carpeta de recursos asociada (_archivos)."""
-    html_name = html_path.stem
-    carpeta_archivos_origen = html_path.parent / f"{html_name}_archivos"
-    
-    if carpeta_archivos_origen.exists() and carpeta_archivos_origen.is_dir():
-        print(f"   📁 Carpeta de recursos encontrada: {carpeta_archivos_origen.name}")
-        archivos_origen = list(carpeta_archivos_origen.rglob('*'))
-        print(f"   📂 Contiene {len(archivos_origen)} elementos")
-        return True
-    else:
-        print(f"   ⚠️ No existe carpeta de recursos: {html_name}_archivos")
-        return False
+    return contenido_modificado, cambios, encoding
 
 
 def registrar_cambios(archivo_html, cambios):
-    """Escribe cambios en el CSV log."""
     existe = LOG_CSV.exists()
-    with open(LOG_CSV, 'a', newline='', encoding='utf-8') as csvfile:
-        writer = csv.writer(csvfile)
+    with open(LOG_CSV, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
         if not existe:
             writer.writerow(["Archivo HTML", "Tipo", "Enlace original", "Enlace nuevo"])
         for original, nuevo, tipo in cambios:
@@ -185,69 +164,59 @@ def registrar_cambios(archivo_html, cambios):
 
 
 # ================== PROCESO PRINCIPAL ==================
-print("="*60)
+print("=" * 60)
 print("🚀 INICIANDO CONVERSIÓN DE ENLACES")
-print("="*60)
-print(f"📂 Carpeta raíz: {CARPETA_RAIZ}")
-print(f"🔗 URL SharePoint: {URL_SHAREPOINT}")
-print(f"📝 Log CSV: {LOG_CSV}")
-print("="*60)
+print("=" * 60)
+print(f"📂 CARPETA_RAIZ: {CARPETA_RAIZ}")
+print(f"🔗 URL_SHAREPOINT: {URL_SHAREPOINT}")
+print(f"📝 LOG_CSV: {LOG_CSV}")
+print("=" * 60)
 
 procesados = set()
-total_modificados = 0
 archivos_procesados = 0
+total_modificados = 0
 
 for html_file in CARPETA_RAIZ.rglob("*.[hH][tT][mM]*"):
-    if html_file.is_file():
-        # Solo ignorar si están dentro de carpetas *_archivos
-        if any(part.endswith('_archivos') for part in html_file.parts):
-            print(f"\n⏭️  Ignorando (dentro de _archivos): {html_file.relative_to(CARPETA_RAIZ)}")
-            continue
 
-        if html_file not in procesados:
-            archivos_procesados += 1
-            print(f"\n" + "-"*60)
-            print(f"📄 ARCHIVO {archivos_procesados}: {html_file.relative_to(CARPETA_RAIZ)}")
-            print("-"*60)
-            procesados.add(html_file)
+    # Ignorar carpetas _archivos
+    if any(part.endswith("_archivos") for part in html_file.parts):
+        continue
 
-            cambios = []
-            try:
-                # Procesar el HTML
-                contenido, encoding_original, cambios = procesar_html(html_file)
-                
-                if cambios:
-                    # Guardar cambios
-                    html_file.write_text(contenido, encoding=encoding_original)
-                    registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
-                    num = len(cambios)
-                    total_modificados += num
-                    print(f"\n   ✅ {num} enlace(s) modificado(s) en este archivo")
-                    
-                    # Mostrar resumen de cambios
-                    print("\n   📋 RESUMEN DE CAMBIOS:")
-                    for i, (orig, nuevo, tipo) in enumerate(cambios, 1):
-                        print(f"      {i}. [{tipo}]")
-                        print(f"         Original: {orig}")
-                        print(f"         Nuevo:    {nuevo}")
-                else:
-                    print(f"\n   ⚠️ No se encontraron enlaces relevantes en este archivo")
-                
-                # Verificar carpeta de recursos
-                copiar_estructura_segura(html_file)
+    if html_file in procesados:
+        continue
 
-            except Exception as e:
-                print(f"\n   ❌ Error procesando archivo: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                if cambios:
-                    registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
+    procesados.add(html_file)
+    archivos_procesados += 1
 
-print("\n" + "="*60)
+    print(f"\n📄 Procesando: {html_file.relative_to(CARPETA_RAIZ)}")
+    print("-" * 40)
+
+    try:
+        contenido, cambios, encoding = procesar_html(html_file)
+
+        if cambios:
+            html_file.write_text(contenido, encoding=encoding)
+            registrar_cambios(str(html_file.relative_to(CARPETA_RAIZ)), cambios)
+            total_modificados += len(cambios)
+            print(f"\n   ✅ {len(cambios)} enlace(s) modificados en este archivo")
+            
+            # Mostrar resumen de cambios
+            for i, (orig, nuevo, tipo) in enumerate(cambios, 1):
+                print(f"      {i}. {tipo}")
+                print(f"         Original: {orig}")
+                print(f"         Nuevo:    {nuevo}")
+        else:
+            print("   ⚠️ Sin cambios")
+
+    except Exception as e:
+        print(f"   ❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+print("\n" + "=" * 60)
 print("🏁 PROCESO COMPLETADO")
-print("="*60)
-print(f"📊 Estadísticas finales:")
-print(f"   • Archivos HTML procesados: {archivos_procesados}")
-print(f"   • Enlaces totales modificados: {total_modificados}")
-print(f"   • Log de cambios: {LOG_CSV}")
-print("="*60)
+print("=" * 60)
+print(f"📄 HTML procesados: {archivos_procesados}")
+print(f"🔗 Enlaces modificados: {total_modificados}")
+print(f"📝 Log CSV: {LOG_CSV}")
+print("=" * 60)
