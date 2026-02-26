@@ -1,0 +1,54 @@
+// Tarjeta ya capturada del mensaje del usuario
+var rawCard = botContext.getCurrentUserMessage();
+
+// Regex Visa (empieza con 4, permite espacios y guiones)
+var visaRegex = /^4[\d\s-]{18,21}$/;
+
+// BINs válidos (longitud variable)
+var validBins = [
+  "457896",
+  "4689512",
+  "46213"
+];
+
+// 1️⃣ Validar formato Visa
+if (!visaRegex.test(rawCard)) {
+
+  // Formato incorrecto
+  botContext.setTriggerNextMessage("Volver a poner correo mundial");
+
+} else {
+
+  // Limpiar tarjeta (quitar espacios y guiones)
+  var cleanCard = rawCard.replace(/[\s-]/g, "");
+
+  // 2️⃣ Validar longitud real
+  if (cleanCard.length !== 16) {
+
+    botContext.setTriggerNextMessage("Volver a poner correo mundial");
+
+  } else {
+
+    // 3️⃣ Validar BIN
+    var binValido = false;
+
+    for (var i = 0; i < validBins.length; i++) {
+      if (cleanCard.startsWith(validBins[i])) {
+        binValido = true;
+        break;
+      }
+    }
+
+    if (!binValido) {
+
+      botContext.setTriggerNextMessage("Bin no valido");
+
+    } else {
+
+      // Tarjeta válida
+      setVar("tarjeta", cleanCard);
+      botContext.setTriggerNextMessage("Resumen tarjeta Mundial FIFA");
+
+    }
+  }
+}
