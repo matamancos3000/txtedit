@@ -2162,52 +2162,47 @@ def main():
             logger.info(f"   Representa el {porcentaje:.1f}% del total")
     
     if "Categoria de cargos" in df_final.columns:
-        total_cat = df_final["Categoria de cargos"].notna().sum()
-        logger.info(f"Categorías de cargos calculadas: {total_cat}")
-        logger.info("\n🎯 NUEVAS HERRAMIENTAS DISPONIBLES:")
-        logger.info("1. Hoja 'Tiempo agente': Distribución diaria de categorías")
-        logger.info("2. Hoja 'Tiempo robot': Distribución diaria de categorías")
-        logger.info("3. Hoja 'Comparativa Agentes': Análisis por Site y Agente")
-        logger.info("4. Gráficas de COLUMNAS APILADAS + línea de totales")
-        logger.info("5. Gráficas muestran AUTOMÁTICAMENTE los ÚLTIMOS 7 días")
-        logger.info("6. Tablas con filtros para seleccionar rangos personalizados")
-        logger.info("7. Gráficas posicionadas al lado derecho de las tablas")
-        logger.info("8. Barras de datos degradadas rojas en tabla comparativa")
+        total_cat = df_final["Categoria de cargos"].notna().sum()  # ← Esto debería estar indentado
+    logger.info(f"Categorías de cargos calculadas: {total_cat}")  # ← Esto también
+    logger.info("\n🎯 NUEVAS HERRAMIENTAS DISPONIBLES:")
 
-# ===== NUEVO RESUMEN DE COLUMNAS AGREGADAS =====
-        logger.info("\n📊 NUEVAS COLUMNAS AGREGADAS AL REPORTE:")
-        logger.info("1. 'Año-Mes': Extrae año y mes de la fecha (formato YYYY-MM)")
-        logger.info("2. 'Total segundos (robot+agente)': Suma de tiempos de robot y agente")
-        logger.info("3. 'Total minutos (robot+agente)': Misma suma en formato mm:ss")
-        logger.info("4. 'Categoria tiempo total': Categorización del tiempo total (11 rangos)")
+    logger.info("1. Hoja 'Tiempo agente': Distribución diaria de categorías")
+    logger.info("2. Hoja 'Tiempo robot': Distribución diaria de categorías")
+    logger.info("3. Hoja 'Comparativa Agentes': Análisis por Site y Agente")
+    logger.info("4. Gráficas de COLUMNAS APILADAS + línea de totales")
+    logger.info("5. Gráficas muestran AUTOMÁTICAMENTE los ÚLTIMOS 7 días")
+    logger.info("6. Tablas con filtros para seleccionar rangos personalizados")
+    logger.info("7. Gráficas posicionadas al lado derecho de las tablas")
+    logger.info("8. Barras de datos degradadas rojas en tabla comparativa")
 
-if "Categoria tiempo total" in df_final.columns:
-    total_cat_total = df_final["Categoria tiempo total"].notna().sum()
-    logger.info(f"✓ Categorías tiempo total calculadas: {total_cat_total}")
+    # ===== NUEVO RESUMEN DE COLUMNAS AGREGADAS =====
+    logger.info("\n📊 NUEVAS COLUMNAS AGREGADAS AL REPORTE:")
+    logger.info("1. 'Año-Mes': Extrae año y mes de la fecha (formato YYYY-MM)")
+    logger.info("2. 'Total segundos (robot+agente)': Suma de tiempos de robot y agente")
+    logger.info("3. 'Total minutos (robot+agente)': Misma suma en formato mm:ss")
+    logger.info("4. 'Categoria tiempo total': Categorización del tiempo total (11 rangos)")
 
-    # Mostrar las categorías más comunes
-    top_categorias = df_final["Categoria tiempo total"].value_counts().head(3)
-    for cat, count in top_categorias.items():
-        if pd.notna(cat):
-            logger.info(f"   • {cat}: {count} casos")
+    if "Categoria tiempo total" in df_final.columns:
+        total_cat_total = df_final["Categoria tiempo total"].notna().sum()
+        logger.info(f"✓ Categorías tiempo total calculadas: {total_cat_total}")
 
-            # ===== INSTRUCCIONES DE USO (AHORA AL MISMO NIVEL) =====
-            logger.info("\n🔧 CÓMO USAR LOS FILTROS:")
-            logger.info("- Haz clic en los filtros de la columna 'Fecha'")
-            logger.info("- Selecciona el rango de fechas que deseas analizar")
-            logger.info("- La gráfica se actualizará automáticamente con la selección")
+        # Mostrar las categorías más comunes
+        top_categorias = df_final["Categoria tiempo total"].value_counts().head(3)
+        for cat, count in top_categorias.items():
+            if pd.notna(cat):
+                logger.info(f"   • {cat}: {count} casos")
 
-            logger.info("\n📊 HOJA 'COMPARATIVA AGENTES':")
-            logger.info("- Tabla 1: Casos por Site y día")
-            logger.info("- Tabla 2: Casos por Agente y día")
-            logger.info("- Barras rojas degradadas muestran distribución")
-            logger.info("- Filtros en encabezados para ordenar datos")
+    # ===== INSTRUCCIONES DE USO =====
+    logger.info("\n🔧 CÓMO USAR LOS FILTROS:")
+    logger.info("- Haz clic en los filtros de la columna 'Fecha'")
+    logger.info("- Selecciona el rango de fechas que deseas analizar")
+    logger.info("- La gráfica se actualizará automáticamente con la selección")
 
-            logger.info("\n✅ PROCESO COMPLETADO EXITOSAMENTE")
-            logger.info("="*60)
+    logger.info("\n📊 HOJA 'COMPARATIVA AGENTES':")
+    logger.info("- Tabla 1: Casos por Site y día")
+    logger.info("- Tabla 2: Casos por Agente y día")
+    logger.info("- Barras rojas degradadas muestran distribución")
+    logger.info("- Filtros en encabezados para ordenar datos")
 
-            # =========================
-            # EJECUCIÓN
-            # =========================
-if __name__ == "__main__":
-    main()
+    logger.info("\n✅ PROCESO COMPLETADO EXITOSAMENTE")
+    logger.info("="*60)
