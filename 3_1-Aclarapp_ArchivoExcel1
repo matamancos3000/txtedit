@@ -75,7 +75,11 @@ COLUMNAS_SALIDA = [
     "Nombre Agente",
     "Supervisor",
     "Site",
-    "Skill"
+    "Skill",
+    "Año-Mes",                    # Columna 28: Año y mes (formato YYYY-MM)
+    "Total segundos (robot+agente)",  # Columna 29: Suma de segundos
+    "Total minutos (robot+agente)",   # Columna 30: Total en minutos (formato mm:ss)
+    "Categoria tiempo total"       # Columna 31: Categoría del tiempo total
 ]
 
 # =========================
@@ -177,6 +181,91 @@ def categorizar_tiempo_alta_robot(segundos):
         return "15min a 20min"
     else:  # 1201-1500 segundos (20-25min)
         return "20min a 25min"
+
+# ===== NUEVAS FUNCIONES PARA COLUMNAS AGREGADAS =====
+def formatear_ano_mes(fecha):
+    """
+    Extrae año y mes de una fecha en formato YYYY-MM
+    """
+    if pd.isna(fecha):
+        return None
+    
+    try:
+        # Si es string, convertir a datetime primero
+        if isinstance(fecha, str):
+            fecha = pd.to_datetime(fecha, errors='coerce')
+        
+        # Formatear como YYYY-MM
+        return fecha.strftime("%Y-%m")
+    except:
+        return None
+
+def calcular_total_segundos(fila):
+    """
+    Suma los segundos de robot y agente (maneja valores nulos)
+    """
+    seg_agente = fila.get("Tiempo de captura agente segundos", 0)
+    seg_robot = fila.get("Tiempo de alta robot segundos", 0)
+    
+    # Convertir a float y manejar nulos
+    try:
+        seg_agente = float(seg_agente) if pd.notna(seg_agente) else 0
+    except:
+        seg_agente = 0
+    
+    try:
+        seg_robot = float(seg_robot) if pd.notna(seg_robot) else 0
+    except:
+        seg_robot = 0
+    
+    total = seg_agente + seg_robot
+    
+    # Si el total es 0, retornar None (para no mostrar ceros cuando no hay datos)
+    return total if total > 0 else None
+
+def convertir_segundos_a_minutos_segundos(segundos):
+    """
+    Convierte segundos totales a formato mm:ss
+    """
+    if pd.isna(segundos) or segundos <= 0:
+        return None
+    
+    minutos = int(segundos // 60)
+    segs = int(segundos % 60)
+    
+    return f"{minutos:02d}:{segs:02d}"
+
+def categorizar_tiempo_total(segundos):
+    """
+    Categoriza el tiempo total (robot + agente) en rangos
+    """
+    if pd.isna(segundos) or segundos <= 0:
+        return None
+    
+    if segundos < 60:
+        return "menos de 1 min"
+    elif segundos <= 90:
+        return "1 min o menos"
+    elif segundos <= 180:
+        return "1 a 3 min"
+    elif segundos <= 300:
+        return "3 a 5 min"
+    elif segundos <= 600:
+        return "5 a 10 min"
+    elif segundos <= 900:
+        return "10 a 15 min"
+    elif segundos <= 1200:
+        return "15 a 20 min"
+    elif segundos <= 1500:
+        return "20 a 25 min"
+    elif segundos <= 1800:
+        return "25 a 30 min"
+    elif segundos <= 2700:
+        return "30 a 45 min"
+    elif segundos <= 3600:
+        return "45 a 60 min"
+    else:
+        return "más de 60 min"
 
 def categorizar_numero_cargos(num_cargos):
     """
@@ -1104,7 +1193,6 @@ def aplicar_formato_completo_excel(archivo_excel):
     Aplica TODO el formato en una sola función para evitar conflictos
     """
     logger.info("\n🎨 APLICANDO FORMATO COMPLETO AL EXCEL...")
-    
     try:
         # Cargar el workbook
         workbook = load_workbook(archivo_excel)
@@ -1192,11 +1280,14 @@ def aplicar_formato_completo_excel(archivo_excel):
             # ============================================
             logger.info("\n🌈 APLICANDO FORMATO CONDICIONAL POR CATEGORÍAS...")
             
-            # Encontrar índices de columnas objetivo
+            # Encontrar indices de columnas objetivo (incluyendo nuevas)
             idx_categoria_agente = None
             idx_categoria_robot = None
             idx_categoria_cargos = None
-            
+            idx_categoria_total = None   # NUEVA
+            idx_total_segundos = None    # NUEVA
+            idx_ano_mes = None           # NUEVA
+
             for idx, col_name in enumerate(columnas, start=1):
                 if col_name == "Categoria tiempo agente":
                     idx_categoria_agente = idx
@@ -1204,14 +1295,20 @@ def aplicar_formato_completo_excel(archivo_excel):
                     idx_categoria_robot = idx
                 elif col_name == "Categoria de cargos":
                     idx_categoria_cargos = idx
-            
+                elif col_name == "Categoria tiempo total":     # NUEVA
+                    idx_categoria_total = idx
+                elif col_name == "Total segundos (robot+agente)":  # NUEVA
+                    idx_total_segundos = idx
+                elif col_name == "A\u00f1o-Mes":                    # NUEVA
+                    idx_ano_mes = idx
+
             if idx_categoria_agente:
-                logger.info(f"✓ 'Categoria tiempo agente' en columna {get_column_letter(idx_categoria_agente)}")
+                logger.info(f"OK 'Categoria tiempo agente' en columna {get_column_letter(idx_categoria_agente)}")
             if idx_categoria_robot:
-                logger.info(f"✓ 'Categoria tiempo Alta robot' en columna {get_column_letter(idx_categoria_robot)}")
+                logger.info(f"OK 'Categoria tiempo Alta robot' en columna {get_column_letter(idx_categoria_robot)}")
             if idx_categoria_cargos:
-                logger.info(f"✓ 'Categoria de cargos' en columna {get_column_letter(idx_categoria_cargos)}")
-            
+                logger.info(f"OK 'Categoria de cargos' en columna {get_column_letter(idx_categoria_cargos)}")
+
             # Definir colores para formato condicional
             fill_verde_claro = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
             fill_verde = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
@@ -1222,23 +1319,37 @@ def aplicar_formato_completo_excel(archivo_excel):
             fill_azul_claro = PatternFill(start_color="B4C6E7", end_color="B4C6E7", fill_type="solid")
             fill_azul = PatternFill(start_color="8EA9DB", end_color="8EA9DB", fill_type="solid")
             fill_negro = PatternFill(start_color="000000", end_color="000000", fill_type="solid")
-            
-            # Colores para categorías de cargos
+
+            # Colores para categorias de cargos
             fill_cargos_verde_claro = PatternFill(start_color="E2F0D9", end_color="E2F0D9", fill_type="solid")
             fill_cargos_verde = PatternFill(start_color="C5E0B4", end_color="C5E0B4", fill_type="solid")
             fill_cargos_amarillo = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
             fill_cargos_naranja = PatternFill(start_color="F8CBAD", end_color="F8CBAD", fill_type="solid")
             fill_cargos_rojo = PatternFill(start_color="F2A7A7", end_color="F2A7A7", fill_type="solid")
-            
+
+            # Nuevos colores para categoria tiempo total
+            fill_total_verde_claro = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+            fill_total_verde = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
+            fill_total_amarillo_claro = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+            fill_total_amarillo = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+            fill_total_naranja_claro = PatternFill(start_color="FFB366", end_color="FFB366", fill_type="solid")
+            fill_total_naranja = PatternFill(start_color="FF9933", end_color="FF9933", fill_type="solid")
+            fill_total_naranja_oscuro = PatternFill(start_color="FF8000", end_color="FF8000", fill_type="solid")
+            fill_total_rojo_claro = PatternFill(start_color="FF6666", end_color="FF6666", fill_type="solid")
+            fill_total_rojo = PatternFill(start_color="FF3333", end_color="FF3333", fill_type="solid")
+            fill_total_rojo_oscuro = PatternFill(start_color="CC0000", end_color="CC0000", fill_type="solid")
+            fill_total_rojo_mas = PatternFill(start_color="990000", end_color="990000", fill_type="solid")
+            fill_total_negro = PatternFill(start_color="000000", end_color="000000", fill_type="solid")
+
             # Aplicar formato condicional a cada fila
             contador_formatos = 0
-            
+
             for row in range(2, total_filas + 1):
-                # Formato para Categoría Tiempo Agente
+                # Formato para Categoria Tiempo Agente
                 if idx_categoria_agente:
                     celda_agente = worksheet.cell(row=row, column=idx_categoria_agente)
                     valor_agente = celda_agente.value
-                    
+
                     if valor_agente:
                         if valor_agente == "menos de 1 min":
                             celda_agente.fill = fill_verde_claro
@@ -1250,15 +1361,15 @@ def aplicar_formato_completo_excel(archivo_excel):
                             celda_agente.fill = fill_amarillo
                         elif valor_agente == "5min a 10min":
                             celda_agente.fill = fill_naranja
-                        elif valor_agente == "más de 10min":
+                        elif valor_agente == "m\u00e1s de 10min":
                             celda_agente.fill = fill_rojo
                         contador_formatos += 1
-                
-                # Formato para Categoría Tiempo Robot
+
+                # Formato para Categoria Tiempo Robot
                 if idx_categoria_robot:
                     celda_robot = worksheet.cell(row=row, column=idx_categoria_robot)
                     valor_robot = celda_robot.value
-                    
+
                     if valor_robot:
                         if valor_robot == "menos de 1min":
                             celda_robot.fill = fill_verde_claro
@@ -1276,19 +1387,20 @@ def aplicar_formato_completo_excel(archivo_excel):
                             celda_robot.fill = fill_azul_claro
                         elif valor_robot == "20min a 25min":
                             celda_robot.fill = fill_azul
-                        elif valor_robot == "Intervención manual (> 25min)":
+                        elif valor_robot == "Intervenci\u00f3n manual (> 25min)":
                             celda_robot.fill = fill_negro
-                            # Para celdas negras, mantener el texto blanco pero con la misma fuente base
-                            celda_robot.font = Font(name=celda_robot.font.name, 
-                                                   size=celda_robot.font.size, 
-                                                   color="FFFFFF")
+                            celda_robot.font = Font(
+                                name=celda_robot.font.name,
+                                size=celda_robot.font.size,
+                                color="FFFFFF"
+                            )
                         contador_formatos += 1
-                
-                # Formato para Categoría de Cargos
+
+                # Formato para Categoria de Cargos
                 if idx_categoria_cargos:
                     celda_cargos = worksheet.cell(row=row, column=idx_categoria_cargos)
                     valor_cargos = celda_cargos.value
-                    
+
                     if valor_cargos:
                         if valor_cargos == "1 cargo":
                             celda_cargos.fill = fill_cargos_verde_claro
@@ -1300,9 +1412,57 @@ def aplicar_formato_completo_excel(archivo_excel):
                             celda_cargos.fill = fill_cargos_naranja
                         else:
                             celda_cargos.fill = fill_cargos_rojo
-                    contador_formatos += 1
-            
-            logger.info(f"   ✓ Formato condicional aplicado a {contador_formatos} celdas (con bordes blancos preservados)")
+                        contador_formatos += 1
+
+                # Formato para Categoria tiempo total
+                if idx_categoria_total:
+                    celda_total = worksheet.cell(row=row, column=idx_categoria_total)
+                    valor_total = celda_total.value
+
+                    if valor_total:
+                        if valor_total == "menos de 1 min":
+                            celda_total.fill = fill_total_verde_claro
+                        elif valor_total == "1 min o menos":
+                            celda_total.fill = fill_total_verde
+                        elif valor_total == "1 a 3 min":
+                            celda_total.fill = fill_total_amarillo_claro
+                        elif valor_total == "3 a 5 min":
+                            celda_total.fill = fill_total_amarillo
+                        elif valor_total == "5 a 10 min":
+                            celda_total.fill = fill_total_naranja_claro
+                        elif valor_total == "10 a 15 min":
+                            celda_total.fill = fill_total_naranja
+                        elif valor_total == "15 a 20 min":
+                            celda_total.fill = fill_total_naranja_oscuro
+                        elif valor_total == "20 a 25 min":
+                            celda_total.fill = fill_total_rojo_claro
+                        elif valor_total == "25 a 30 min":
+                            celda_total.fill = fill_total_rojo
+                        elif valor_total == "30 a 45 min":
+                            celda_total.fill = fill_total_rojo_oscuro
+                        elif valor_total == "45 a 60 min":
+                            celda_total.fill = fill_total_rojo_mas
+                        elif valor_total == "m\u00e1s de 60 min":
+                            celda_total.fill = fill_total_negro
+                            celda_total.font = Font(
+                                name=celda_total.font.name,
+                                size=celda_total.font.size,
+                                color="FFFFFF"
+                            )
+                        contador_formatos += 1
+
+                # Formato para columna Total segundos
+                if idx_total_segundos:
+                    celda_segundos = worksheet.cell(row=row, column=idx_total_segundos)
+                    if celda_segundos.value and isinstance(celda_segundos.value, (int, float)):
+                        celda_segundos.number_format = '#,##0'
+
+                # Formato para columna A\u00f1o-Mes
+                if idx_ano_mes:
+                    celda_ano_mes = worksheet.cell(row=row, column=idx_ano_mes)
+                    celda_ano_mes.alignment = Alignment(horizontal="center", vertical="center")
+
+            logger.info(f"   OK Formato condicional aplicado a {contador_formatos} celdas (con bordes blancos preservados)")
             
             # ============================================
             # 4. APLICAR FORMATO ESPECIAL A COLUMNAS DE FECHA
@@ -1805,16 +1965,80 @@ def main():
     # =========================
     df = calcular_tiempos_agente_robot(df)
 
-    # =========================
+       # =========================
     # CALCULAR CATEGORÍAS DE CARGOS (REVISADO)
     # =========================
     df = calcular_categorias_cargos(df)
-
+    
+    # ===== NUEVA SECCIÓN: CALCULAR COLUMNAS AGREGADAS =====
+    logger.info("\n📅 CALCULANDO NUEVAS COLUMNAS DE TIEMPO AGREGADO...")
+    
+    # 1. Columna Año-Mes
+    if "Fecha" in df.columns:
+        logger.info("  Calculando Año-Mes desde columna 'Fecha'...")
+        df["Año-Mes"] = df["Fecha"].apply(formatear_ano_mes)
+        
+        # Mostrar estadísticas
+        valores_ano_mes = df["Año-Mes"].notna().sum()
+        logger.info(f"  ✓ Año-Mes calculado: {valores_ano_mes} filas")
+        
+        # Mostrar meses únicos encontrados
+        meses_unicos = df["Año-Mes"].dropna().unique()
+        if len(meses_unicos) > 0:
+            logger.info(f"  Meses encontrados: {sorted(meses_unicos)}")
+    else:
+        logger.warning("  ⚠️ No se encontró columna 'Fecha' para calcular Año-Mes")
+        df["Año-Mes"] = None
+    
+    # 2. Columna Total segundos (robot + agente)
+    logger.info("  Calculando total de segundos (robot + agente)...")
+    df["Total segundos (robot+agente)"] = df.apply(calcular_total_segundos, axis=1)
+    
+    # Estadísticas de totales
+    total_segundos_validos = df["Total segundos (robot+agente)"].notna().sum()
+    logger.info(f"  ✓ Total segundos calculado: {total_segundos_validos} filas")
+    
+    if total_segundos_validos > 0:
+        # Mostrar estadísticas
+        total_min = df["Total segundos (robot+agente)"].min()
+        total_max = df["Total segundos (robot+agente)"].max()
+        total_mean = df["Total segundos (robot+agente)"].mean()
+        
+        logger.info(f"  Estadísticas de tiempo total (segundos):")
+        logger.info(f"    Mínimo: {total_min:.0f}s")
+        logger.info(f"    Máximo: {total_max:.0f}s")
+        logger.info(f"    Promedio: {total_mean:.0f}s")
+    
+    # 3. Columna Total minutos (formato mm:ss)
+    logger.info("  Convirtiendo a formato minutos:segundos...")
+    df["Total minutos (robot+agente)"] = df["Total segundos (robot+agente)"].apply(convertir_segundos_a_minutos_segundos)
+    
+    # Mostrar ejemplo
+    if total_segundos_validos > 0:
+        idx_ejemplo = df[df["Total segundos (robot+agente)"].notna()].index[0]
+        ejemplo = df.loc[idx_ejemplo]
+        logger.info(f"  Ejemplo de conversión:")
+        logger.info(f"    Segundos totales: {ejemplo['Total segundos (robot+agente)']:.0f}")
+        logger.info(f"    Formato mm:ss: {ejemplo['Total minutos (robot+agente)']}")
+    
+    # 4. Columna Categoria tiempo total
+    logger.info("  Categorizando tiempo total...")
+    df["Categoria tiempo total"] = df["Total segundos (robot+agente)"].apply(categorizar_tiempo_total)
+    
+    # Mostrar distribución de categorías
+    if total_segundos_validos > 0:
+        logger.info("  Distribución de categorías de tiempo total:")
+        categorias_total = df["Categoria tiempo total"].value_counts()
+        for categoria, count in categorias_total.items():
+            if pd.notna(categoria):
+                porcentaje = (count / total_segundos_validos * 100)
+                logger.info(f"    {categoria}: {count} ({porcentaje:.1f}%)")
+    
     # =========================
     # OTRAS TRANSFORMACIONES
     # =========================
     logger.info("\n⚙️ APLICANDO OTRAS TRANSFORMACIONES...")
-    
+
     # Cambiar Estatus a "Exitoso"
     if "Estatus" in df.columns:
         df["Estatus"] = "Exitoso"
@@ -1951,22 +2175,67 @@ def main():
     logger.info("7. Gráficas posicionadas al lado derecho de las tablas")
     logger.info("8. Barras de datos degradadas rojas en tabla comparativa")
     
-    logger.info("\n🔧 CÓMO USAR LOS FILTROS:")
-    logger.info("- Haz clic en los filtros de la columna 'Fecha'")
-    logger.info("- Selecciona el rango de fechas que deseas analizar")
-    logger.info("- La gráfica se actualizará automáticamente con la selección")
+    # ===== NUEVO RESUMEN DE COLUMNAS AGREGADAS =====
+    logger.info("\n📊 NUEVAS COLUMNAS AGREGADAS AL REPORTE:")
+    logger.info("1. 'Año-Mes': Extrae año y mes de la fecha (formato YYYY-MM)")
+    logger.info("2. 'Total segundos (robot+agente)': Suma de tiempos de robot y agente")
+    logger.info("3. 'Total minutos (robot+agente)': Misma suma en formato mm:ss")
+    logger.info("4. 'Categoria tiempo total': Categorización del tiempo total (11 rangos)")
     
-    logger.info("\n📊 HOJA 'COMPARATIVA AGENTES':")
-    logger.info("- Tabla 1: Casos por Site y día")
-    logger.info("- Tabla 2: Casos por Agente y día")
-    logger.info("- Barras rojas degradadas muestran distribución")
-    logger.info("- Filtros en encabezados para ordenar datos")
-    
-    logger.info("\n✅ PROCESO COMPLETADO EXITOSAMENTE")
-    logger.info("="*60)
+    if "Categoria tiempo total" in df_final.columns:
+        total_cat_total = df_final["Categoria tiempo total"].notna().sum()
+        logger.info(f"✓ Categorías tiempo total calculadas: {total_cat_total}")
+        
+        # Mostrar las categorías más comunes
+        top_categorias = df_final["Categoria tiempo total"].value_counts().head(3)
+        for cat, count in top_categorias.items():
+            if pd.notna(cat):
+               logger.info(f"   • {cat}: {count} casos")
 
-# =========================
-# EJECUCIÓN
-# =========================
+logger.info("\n🎯 NUEVAS HERRAMIENTAS DISPONIBLES:")
+logger.info("1. Hoja 'Tiempo agente': Distribución diaria de categorías")
+logger.info("2. Hoja 'Tiempo robot': Distribución diaria de categorías")
+logger.info("3. Hoja 'Comparativa Agentes': Análisis por Site y Agente")
+logger.info("4. Gráficas de COLUMNAS APILADAS + línea de totales")
+logger.info("5. Gráficas muestran AUTOMÁTICAMENTE los ÚLTIMOS 7 días")
+logger.info("6. Tablas con filtros para seleccionar rangos personalizados")
+logger.info("7. Gráficas posicionadas al lado derecho de las tablas")
+logger.info("8. Barras de datos degradadas rojas en tabla comparativa")
+
+# ===== NUEVO RESUMEN DE COLUMNAS AGREGADAS =====
+logger.info("\n📊 NUEVAS COLUMNAS AGREGADAS AL REPORTE:")
+logger.info("1. 'Año-Mes': Extrae año y mes de la fecha (formato YYYY-MM)")
+logger.info("2. 'Total segundos (robot+agente)': Suma de tiempos de robot y agente")
+logger.info("3. 'Total minutos (robot+agente)': Misma suma en formato mm:ss")
+logger.info("4. 'Categoria tiempo total': Categorización del tiempo total (11 rangos)")
+
+if "Categoria tiempo total" in df_final.columns:
+    total_cat_total = df_final["Categoria tiempo total"].notna().sum()
+    logger.info(f"✓ Categorías tiempo total calculadas: {total_cat_total}")
+
+    # Mostrar las categorías más comunes
+    top_categorias = df_final["Categoria tiempo total"].value_counts().head(3)
+    for cat, count in top_categorias.items():
+        if pd.notna(cat):
+            logger.info(f"   • {cat}: {count} casos")
+
+            logger.info("\n🔧 CÓMO USAR LOS FILTROS:")
+            logger.info("- Haz clic en los filtros de la columna 'Fecha'")
+            logger.info("- Selecciona el rango de fechas que deseas analizar")
+            logger.info("- La gráfica se actualizará automáticamente con la selección")
+
+            logger.info("\n📊 HOJA 'COMPARATIVA AGENTES':")
+            logger.info("- Tabla 1: Casos por Site y día")
+            logger.info("- Tabla 2: Casos por Agente y día")
+            logger.info("- Barras rojas degradadas muestran distribución")
+            logger.info("- Filtros en encabezados para ordenar datos")
+
+            logger.info("\n✅ PROCESO COMPLETADO EXITOSAMENTE")
+            logger.info("="*60)
+
+            # =========================
+            # EJECUCIÓN
+            # =========================
 if __name__ == "__main__":
     main()
+
