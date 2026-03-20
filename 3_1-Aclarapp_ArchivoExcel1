@@ -1,4 +1,3 @@
-
 import pandas as pd
 import logging
 from pathlib import Path
@@ -142,17 +141,17 @@ def categorizar_tiempo_agente(segundos):
         return None
     
     if segundos < 60:
-        return "menos de 1 min"
+        return "1. menos de 1 min"
     elif segundos <= 90:
-        return "menos de 1min 30seg"
+        return "2. menos de 1min 30seg"
     elif segundos <= 180:
-        return "1min 30seg a 3min"
+        return "3. 1min 30seg a 3min"
     elif segundos <= 300:
-        return "3min a 5min"
+        return "4. 3min a 5min"
     elif segundos <= 600:
-        return "5min a 10min"
+        return "5. 5min a 10min"
     else:  # > 600
-        return "más de 10min"
+        return "6. más de 10min"
 
 def categorizar_tiempo_alta_robot(segundos):
     """
@@ -164,23 +163,23 @@ def categorizar_tiempo_alta_robot(segundos):
     
     # 25 minutos = 1500 segundos
     if segundos > 1500:  # > 25 minutos
-        return "Intervención manual (> 25min)"
+        return "9. Intervención manual (> 25min)"
     elif segundos <= 60:
-        return "menos de 1min"
+        return "1. menos de 1min"
     elif segundos <= 90:
-        return "1min a 1min 30seg"
+        return "2. 1min a 1min 30seg"
     elif segundos <= 180:
-        return "1min 30seg a 3min"
+        return "3. 1min 30seg a 3min"
     elif segundos <= 300:
-        return "3min a 5min"
+        return "4. 3min a 5min"
     elif segundos <= 600:
-        return "5min a 10min"
+        return "5. 5min a 10min"
     elif segundos <= 900:
-        return "10min a 15min"
+        return "6. 10min a 15min"
     elif segundos <= 1200:
-        return "15min a 20min"
+        return "7. 15min a 20min"
     else:  # 1201-1500 segundos (20-25min)
-        return "20min a 25min"
+        return "8. 20min a 25min"
 
 # ===== NUEVAS FUNCIONES PARA COLUMNAS AGREGADAS =====
 def formatear_ano_mes(fecha):
@@ -243,29 +242,29 @@ def categorizar_tiempo_total(segundos):
         return None
     
     if segundos < 60:
-        return "menos de 1 min"
+        return "01. menos de 1 min"  # ← Cambiado
     elif segundos <= 90:
-        return "1 min o menos"
+        return "02. 1 min o menos"   # ← Cambiado
     elif segundos <= 180:
-        return "1 a 3 min"
+        return "03. 1 a 3 min"       # ← Cambiado
     elif segundos <= 300:
-        return "3 a 5 min"
+        return "04. 3 a 5 min"       # ← Cambiado
     elif segundos <= 600:
-        return "5 a 10 min"
+        return "05. 5 a 10 min"      # ← Cambiado
     elif segundos <= 900:
-        return "10 a 15 min"
+        return "06. 10 a 15 min"     # ← Cambiado
     elif segundos <= 1200:
-        return "15 a 20 min"
+        return "07. 15 a 20 min"     # ← Cambiado
     elif segundos <= 1500:
-        return "20 a 25 min"
+        return "08. 20 a 25 min"     # ← Cambiado
     elif segundos <= 1800:
-        return "25 a 30 min"
+        return "09. 25 a 30 min"     # ← Cambiado
     elif segundos <= 2700:
-        return "30 a 45 min"
+        return "10. 30 a 45 min"     # ← Cambiado
     elif segundos <= 3600:
-        return "45 a 60 min"
+        return "11. 45 a 60 min"     # ← Cambiado
     else:
-        return "más de 60 min"
+        return "12. más de 60 min"   # ← Cambiado
 
 def categorizar_numero_cargos(num_cargos):
     """
@@ -277,31 +276,31 @@ def categorizar_numero_cargos(num_cargos):
     num_cargos_int = int(num_cargos)
     
     if num_cargos_int == 1:
-        return "1 cargo"
+        return "01. 1 cargo"
     elif 2 <= num_cargos_int <= 5:
-        return "2 a 5 cargos"
+        return "02. 2 a 5 cargos"
     elif 6 <= num_cargos_int <= 10:
-        return "6 a 10 cargos"
+        return "03. 6 a 10 cargos"
     elif 11 <= num_cargos_int <= 20:
-        return "11 a 20 cargos"
+        return "04. 11 a 20 cargos"
     elif 21 <= num_cargos_int <= 30:
-        return "21 a 30 cargos"
+        return "05. 21 a 30 cargos"
     elif 31 <= num_cargos_int <= 40:
-        return "31 a 40 cargos"
+        return "06. 31 a 40 cargos"
     elif 41 <= num_cargos_int <= 50:
-        return "41 a 50 cargos"
+        return "07. 41 a 50 cargos"
     elif 51 <= num_cargos_int <= 60:
-        return "51 a 60 cargos"
+        return "08. 51 a 60 cargos"
     elif 61 <= num_cargos_int <= 70:
-        return "61 a 70 cargos"
+        return "09. 61 a 70 cargos"
     elif 71 <= num_cargos_int <= 80:
-        return "71 a 80 cargos"
+        return "10. 71 a 80 cargos"
     elif 81 <= num_cargos_int <= 90:
-        return "81 a 90 cargos"
+        return "11. 81 a 90 cargos"
     elif 91 <= num_cargos_int <= 100:
-        return "91 a 100 cargos"
+        return "12. 91 a 100 cargos"
     else:  # > 100
-        return "más de 100 cargos"
+        return "13. más de 100 cargos"
 
 def crear_hoja_comparativa_agentes(workbook, df):
     """
@@ -777,12 +776,12 @@ def crear_hoja_tiempo_agente(workbook, df):
     
     # Definir el orden de las categorías
     categorias_orden = [
-        "menos de 1 min",
-        "menos de 1min 30seg", 
-        "1min 30seg a 3min",
-        "3min a 5min",
-        "5min a 10min",
-        "más de 10min"
+        "1. menos de 1 min",
+        "2. menos de 1min 30seg", 
+        "3. 1min 30seg a 3min",
+        "4. 3min a 5min",
+        "5. 5min a 10min",
+        "6. más de 10min"
     ]
     
     # Crear tabla pivote
@@ -870,15 +869,15 @@ def crear_hoja_tiempo_robot(workbook, df):
     
     # Definir el orden de las categorías
     categorias_orden = [
-        "menos de 1min",
-        "1min a 1min 30seg",
-        "1min 30seg a 3min",
-        "3min a 5min",
-        "5min a 10min",
-        "10min a 15min",
-        "15min a 20min",
-        "20min a 25min",
-        "Intervención manual (> 25min)"
+        "1. menos de 1min",
+        "2. 1min a 1min 30seg",
+        "3. 1min 30seg a 3min",
+        "4. 3min a 5min",
+        "5. 5min a 10min",
+        "6. 10min a 15min",
+        "7. 15min a 20min",
+        "8. 20min a 25min",
+        "9. Intervención manual (> 25min)"
     ]
     
     # Crear tabla pivote
@@ -1351,17 +1350,17 @@ def aplicar_formato_completo_excel(archivo_excel):
                     valor_agente = celda_agente.value
 
                     if valor_agente:
-                        if valor_agente == "menos de 1 min":
+                        if valor_agente == "1. menos de 1 min":
                             celda_agente.fill = fill_verde_claro
-                        elif valor_agente == "menos de 1min 30seg":
+                        elif valor_agente == "2. menos de 1min 30seg":
                             celda_agente.fill = fill_verde
-                        elif valor_agente == "1min 30seg a 3min":
+                        elif valor_agente == "3. 1min 30seg a 3min":
                             celda_agente.fill = fill_amarillo_claro
-                        elif valor_agente == "3min a 5min":
+                        elif valor_agente == "4. 3min a 5min":
                             celda_agente.fill = fill_amarillo
-                        elif valor_agente == "5min a 10min":
+                        elif valor_agente == "5. 5min a 10min":
                             celda_agente.fill = fill_naranja
-                        elif valor_agente == "m\u00e1s de 10min":
+                        elif valor_agente == "6. m\u00e1s de 10min":
                             celda_agente.fill = fill_rojo
                         contador_formatos += 1
 
@@ -1371,23 +1370,23 @@ def aplicar_formato_completo_excel(archivo_excel):
                     valor_robot = celda_robot.value
 
                     if valor_robot:
-                        if valor_robot == "menos de 1min":
+                        if valor_robot == "1. menos de 1min":
                             celda_robot.fill = fill_verde_claro
-                        elif valor_robot == "1min a 1min 30seg":
+                        elif valor_robot == "2. 1min a 1min 30seg":
                             celda_robot.fill = fill_verde
-                        elif valor_robot == "1min 30seg a 3min":
+                        elif valor_robot == "3. 1min 30seg a 3min":
                             celda_robot.fill = fill_amarillo_claro
-                        elif valor_robot == "3min a 5min":
+                        elif valor_robot == "4. 3min a 5min":
                             celda_robot.fill = fill_amarillo
-                        elif valor_robot == "5min a 10min":
+                        elif valor_robot == "5. 5min a 10min":
                             celda_robot.fill = fill_naranja
-                        elif valor_robot == "10min a 15min":
+                        elif valor_robot == "6. 10min a 15min":
                             celda_robot.fill = fill_rojo
-                        elif valor_robot == "15min a 20min":
+                        elif valor_robot == "7. 15min a 20min":
                             celda_robot.fill = fill_azul_claro
-                        elif valor_robot == "20min a 25min":
+                        elif valor_robot == "8. 20min a 25min":
                             celda_robot.fill = fill_azul
-                        elif valor_robot == "Intervenci\u00f3n manual (> 25min)":
+                        elif valor_robot == "9. Intervenci\u00f3n manual (> 25min)":
                             celda_robot.fill = fill_negro
                             celda_robot.font = Font(
                                 name=celda_robot.font.name,
@@ -1402,13 +1401,13 @@ def aplicar_formato_completo_excel(archivo_excel):
                     valor_cargos = celda_cargos.value
 
                     if valor_cargos:
-                        if valor_cargos == "1 cargo":
+                        if valor_cargos == "01. 1 cargo":
                             celda_cargos.fill = fill_cargos_verde_claro
-                        elif valor_cargos == "2 a 5 cargos":
+                        elif valor_cargos == "02. 2 a 5 cargos":
                             celda_cargos.fill = fill_cargos_verde
-                        elif valor_cargos == "6 a 10 cargos":
+                        elif valor_cargos == "03. 6 a 10 cargos":
                             celda_cargos.fill = fill_cargos_amarillo
-                        elif valor_cargos in ["11 a 20 cargos", "21 a 30 cargos"]:
+                        elif valor_cargos in ["04. 11 a 20 cargos", "05. 21 a 30 cargos"]:
                             celda_cargos.fill = fill_cargos_naranja
                         else:
                             celda_cargos.fill = fill_cargos_rojo
@@ -1420,29 +1419,29 @@ def aplicar_formato_completo_excel(archivo_excel):
                     valor_total = celda_total.value
 
                     if valor_total:
-                        if valor_total == "menos de 1 min":
+                        if valor_total == "01. menos de 1 min":
                             celda_total.fill = fill_total_verde_claro
-                        elif valor_total == "1 min o menos":
+                        elif valor_total == "02. 1 min o menos":
                             celda_total.fill = fill_total_verde
-                        elif valor_total == "1 a 3 min":
+                        elif valor_total == "03. 1 a 3 min":
                             celda_total.fill = fill_total_amarillo_claro
-                        elif valor_total == "3 a 5 min":
+                        elif valor_total == "04. 3 a 5 min":
                             celda_total.fill = fill_total_amarillo
-                        elif valor_total == "5 a 10 min":
+                        elif valor_total == "05. 5 a 10 min":
                             celda_total.fill = fill_total_naranja_claro
-                        elif valor_total == "10 a 15 min":
+                        elif valor_total == "06. 10 a 15 min":
                             celda_total.fill = fill_total_naranja
-                        elif valor_total == "15 a 20 min":
+                        elif valor_total == "07. 15 a 20 min":
                             celda_total.fill = fill_total_naranja_oscuro
-                        elif valor_total == "20 a 25 min":
+                        elif valor_total == "08. 20 a 25 min":
                             celda_total.fill = fill_total_rojo_claro
-                        elif valor_total == "25 a 30 min":
+                        elif valor_total == "09. 25 a 30 min":
                             celda_total.fill = fill_total_rojo
-                        elif valor_total == "30 a 45 min":
+                        elif valor_total == "10. 30 a 45 min":
                             celda_total.fill = fill_total_rojo_oscuro
-                        elif valor_total == "45 a 60 min":
+                        elif valor_total == "11. 45 a 60 min":
                             celda_total.fill = fill_total_rojo_mas
-                        elif valor_total == "m\u00e1s de 60 min":
+                        elif valor_total == "12. m\u00e1s de 60 min":
                             celda_total.fill = fill_total_negro
                             celda_total.font = Font(
                                 name=celda_total.font.name,
