@@ -2162,10 +2162,10 @@ def main():
             logger.info(f"   Representa el {porcentaje:.1f}% del total")
     
     if "Categoria de cargos" in df_final.columns:
-        total_cat = df_final["Categoria de cargos"].notna().sum()  # ← Esto debería estar indentado
-    logger.info(f"Categorías de cargos calculadas: {total_cat}")  # ← Esto también
+        total_cat = df_final["Categoria de cargos"].notna().sum()
+        logger.info(f"Categorías de cargos calculadas: {total_cat}")
+    
     logger.info("\n🎯 NUEVAS HERRAMIENTAS DISPONIBLES:")
-
     logger.info("1. Hoja 'Tiempo agente': Distribución diaria de categorías")
     logger.info("2. Hoja 'Tiempo robot': Distribución diaria de categorías")
     logger.info("3. Hoja 'Comparativa Agentes': Análisis por Site y Agente")
@@ -2206,3 +2206,9 @@ def main():
 
     logger.info("\n✅ PROCESO COMPLETADO EXITOSAMENTE")
     logger.info("="*60)
+
+# =========================
+# EJECUCIÓN
+# =========================
+if __name__ == "__main__":
+    main()
