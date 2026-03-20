@@ -244,7 +244,7 @@ def categorizar_tiempo_total(segundos):
     if segundos < 60:
         return "01. menos de 1 min"  # ← Cambiado
     elif segundos <= 90:
-        return "02. 1 min o menos"   # ← Cambiado
+        return "02. 1 min 30s o menos"   # ← Cambiado
     elif segundos <= 180:
         return "03. 1 a 3 min"       # ← Cambiado
     elif segundos <= 300:
@@ -1421,7 +1421,7 @@ def aplicar_formato_completo_excel(archivo_excel):
                     if valor_total:
                         if valor_total == "01. menos de 1 min":
                             celda_total.fill = fill_total_verde_claro
-                        elif valor_total == "02. 1 min o menos":
+                        elif valor_total == "02. 1 min 30s o menos":
                             celda_total.fill = fill_total_verde
                         elif valor_total == "03. 1 a 3 min":
                             celda_total.fill = fill_total_amarillo_claro
