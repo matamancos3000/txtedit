@@ -3,11 +3,11 @@ import re
 
 # Variaciones por letra (carácter a carácter)
 variaciones_letras = {
-    'a': '(a|á|à|ä|â|ha)',      # 'a' puede ser 'ha' (ej: a ver -> haber)
-    'e': '(e|é|è|ë|ê|he)',      # 'e' puede ser 'he'
-    'i': '(i|í|ì|ï|î|hi)',      # 'i' puede ser 'hi'
-    'o': '(o|ó|ò|ö|ô|ho)',      # 'o' puede ser 'ho'
-    'u': '(u|ú|ù|ü|û|hu)',      # 'u' puede ser 'hu'
+    'a': '(a|á|à|ä|â|ha)',
+    'e': '(e|é|è|ë|ê|he)',
+    'i': '(i|í|ì|ï|î|hi)',
+    'o': '(o|ó|ò|ö|ô|ho)',
+    'u': '(u|ú|ù|ü|û|hu)',
     'n': '(n|ñ|m)',
     'ñ': '(ñ|n)',
     'm': '(m|n|ñ)',
@@ -24,53 +24,36 @@ variaciones_letras = {
     'll': '(ll|y)'
 }
 
-# 🔥 NUEVA: Reglas especiales para la H muda
+# Reglas especiales para la H muda
 reglas_h_muda = {
-    # Palabras que empiezan con H (pueden perderla)
-    'hacer': '(hacer|acer|aser|hacer)',
-    'hola': '(hola|ola|hóla|hola)',
+    'hacer': '(hacer|acer|aser|hazer|hacer)',
+    'hola': '(hola|ola|hóla)',
     'hermano': '(hermano|ermano|er mano)',
-    'hijo': '(hijo|ijo|hijo)',
-    'hasta': '(hasta|asta|hasta)',
-    'haber': '(haber|aber|haver|a ver|haber)',
-    'hablar': '(hablar|ablar|avlar|hablar)',
-    'hacer': '(hacer|aser|hacer|hazer)',
-    'hecho': '(hecho|echo|echó|hecho)',  # Hecho (participio) vs Echo (acción)
+    'hijo': '(hijo|ijo)',
+    'hasta': '(hasta|asta)',
+    'haber': '(haber|aber|haver|a ver|aver|haber)',
+    'hablar': '(hablar|ablar|avlar)',
+    'hecho': '(hecho|echo|echó)',
     'huevo': '(huevo|uevo|huebo)',
     'hueso': '(hueso|ueso)',
-    'hielo': '(hielo|ielo)',
-    'hiena': '(hiena|iena)',
-    'hiato': '(hiato|iato)',
-    'hierba': '(hierba|ierba|yerba)',
-    'higo': '(higo|igo)',
-    'hilo': '(hilo|ilo)',
-    'himen': '(himen|imen)',
-    'himno': '(himno|imno|hinmo)',
-    'hipo': '(hipo|ipo)',
-    'hueco': '(hueco|ueco|hueco)',
-    'huerta': '(huerta|uerta)',
-    'huir': '(huir|uir)',
-    'humo': '(humo|umo)',
 }
 
-# Sustituciones de palabras completas (incluyendo variaciones con H)
+# Sustituciones de palabras completas
 sustituciones_palabras = {
     'por': '(por|x|p|para)',
     'para': '(para|pa|por)',
     'porque': '(porque|xq|pk|pq|por que|porq)',
     'que': '(que|q|ke|k)',
-    'como': '(como|cómo|komo|cm|como)',
-    'esta': '(esta|está|ta|sta|esta)',
-    'está': '(está|esta|ta|sta|esta)',
-    'hecho': '(hecho|echo|echó)',           # Ya incluido arriba
+    'como': '(como|cómo|komo|cm)',
+    'esta': '(esta|está|ta|sta)',
+    'está': '(está|esta|ta|sta)',
+    'hecho': '(hecho|echo|echó)',
     'ahí': '(ahí|hay|ay|ahi)',
     'hay': '(hay|ahí|ay|ahi|hai)',
     'ay': '(ay|hay|ahí|ahi)',
-    'haber': '(haber|aber|a ver|aver)',     # Caso especial: "a ver" vs "haber"
+    'haber': '(haber|aber|a ver|aver)',
     'hola': '(hola|ola|hóla)',
     'hacer': '(hacer|aser|hazer)',
-    'hijo': '(hijo|ijo)',
-    'hasta': '(hasta|asta)',
 }
 
 def quitar_acentos_liveperson(texto):
@@ -80,12 +63,10 @@ def quitar_acentos_liveperson(texto):
     i = 0
     while i < len(texto_nfd):
         c = texto_nfd[i]
-        # Si es una 'n' seguida de la tilde de la ñ (U+0303)
         if c == 'n' and i + 1 < len(texto_nfd) and texto_nfd[i+1] == '\u0303':
             resultado.append('ñ')
             i += 2
             continue
-        # Si es un carácter diacrítico (acentos), lo ignoramos
         elif unicodedata.category(c) == 'Mn':
             i += 1
             continue
@@ -95,9 +76,7 @@ def quitar_acentos_liveperson(texto):
     return ''.join(resultado)
 
 def aplicar_reglas_h_muda(texto):
-    """
-    Aplica reglas especiales para palabras que pueden perder la H inicial.
-    """
+    """Aplica reglas especiales para palabras que pueden perder la H inicial."""
     palabras = texto.split()
     resultado = []
     i = 0
@@ -106,20 +85,15 @@ def aplicar_reglas_h_muda(texto):
         palabra_actual = palabras[i]
         reemplazado = False
         
-        # Verificar si la palabra tiene regla especial por H muda
         if palabra_actual in reglas_h_muda:
             resultado.append(reglas_h_muda[palabra_actual])
             reemplazado = True
-        # Verificar si es una palabra que empieza con H (pero no está en reglas)
         elif palabra_actual.startswith('h') and len(palabra_actual) > 1:
-            # Generar variación automática: con H y sin H
-            sin_h = palabra_actual[1:]  # Quitar la H
-            # También considerar H aspirada vs muda (para extranjerismos)
+            sin_h = palabra_actual[1:]
             if sin_h:
                 resultado.append(f"({palabra_actual}|{sin_h})")
                 reemplazado = True
         
-        # Si no se aplicó ninguna regla, mantener la palabra original
         if not reemplazado:
             resultado.append(palabra_actual)
         
@@ -128,10 +102,7 @@ def aplicar_reglas_h_muda(texto):
     return ' '.join(resultado)
 
 def aplicar_sustituciones_palabras(texto):
-    """
-    Aplica sustituciones de palabras completas a una frase.
-    """
-    texto_original = texto
+    """Aplica sustituciones de palabras completas a una frase."""
     palabras = texto.split()
     resultado = []
     i = 0
@@ -140,7 +111,6 @@ def aplicar_sustituciones_palabras(texto):
         palabra_actual = palabras[i]
         reemplazado = False
         
-        # Primero revisar frases de 2 palabras (ej: "por que", "a ver")
         if i + 1 < len(palabras):
             frase_dos_palabras = f"{palabra_actual} {palabras[i+1]}"
             if frase_dos_palabras in sustituciones_palabras:
@@ -148,7 +118,6 @@ def aplicar_sustituciones_palabras(texto):
                 i += 2
                 reemplazado = True
         
-        # Si no fue frase de 2 palabras, revisar palabra individual
         if not reemplazado:
             if palabra_actual in sustituciones_palabras:
                 resultado.append(sustituciones_palabras[palabra_actual])
@@ -158,7 +127,7 @@ def aplicar_sustituciones_palabras(texto):
     
     return ' '.join(resultado)
 
-def generar_regex_liveperson(frase, usar_sustituciones=True, usar_h_muda=True):
+def generar_regex_liveperson(frase, usar_sustituciones=True, usar_h_muda=True, espacios_opcionales=True):
     """
     Genera expresión regular para LivePerson.
     
@@ -166,11 +135,12 @@ def generar_regex_liveperson(frase, usar_sustituciones=True, usar_h_muda=True):
         frase: Texto a convertir en regex
         usar_sustituciones: Si True, aplica sustituciones de palabras (ej: por = x)
         usar_h_muda: Si True, aplica reglas para detectar palabras con/sin H
+        espacios_opcionales: Si True, permite que los espacios sean opcionales (pueden ser espacio o nada)
     """
     frase = frase.lower().strip()
     frase = quitar_acentos_liveperson(frase)
     
-    # Aplicar reglas en orden: primero H muda, luego sustituciones
+    # Aplicar reglas en orden
     if usar_h_muda:
         frase = aplicar_reglas_h_muda(frase)
     
@@ -184,7 +154,7 @@ def generar_regex_liveperson(frase, usar_sustituciones=True, usar_h_muda=True):
     for palabra in palabras:
         # Si la palabra ya es un grupo (contiene paréntesis), la usamos directamente
         if palabra.startswith('(') and palabra.endswith(')'):
-            patrones_por_palabra.append(palabra)
+            patron_palabra_completo = palabra
         else:
             # Procesamos letra por letra
             patron_palabra = ""
@@ -193,34 +163,79 @@ def generar_regex_liveperson(frase, usar_sustituciones=True, usar_h_muda=True):
                     patron_palabra += variaciones_letras[letra]
                 else:
                     patron_palabra += letra
-            patrones_por_palabra.append(f"({patron_palabra})")
+            patron_palabra_completo = f"({patron_palabra})"
+        
+        patrones_por_palabra.append(patron_palabra_completo)
     
-    # Unimos las palabras con espacios flexibles
-    regex_final = r'\s+'.join(patrones_por_palabra)
+    # 🔥 NUEVO: Unir palabras con espacios opcionales
+    if espacios_opcionales:
+        # El separador puede ser espacio o nada (para detectar palabras pegadas)
+        # Ej: "hola mundo" también detectará "holamundo"
+        separador = r'\s*'  # 0 o más espacios (incluyendo 0)
+        # También podemos permitir otros separadores comunes
+        separador = r'[\s]*'  # Más explícito
+    else:
+        separador = r'\s+'  # 1 o más espacios (obligatorio)
+    
+    regex_final = separador.join(patrones_por_palabra)
     
     return regex_final
 
-def mostrar_ejemplos_h_muda():
-    """Muestra ejemplos de detección de H muda."""
+def generar_regex_con_grupos_opcionales(frase, usar_sustituciones=True, usar_h_muda=True):
+    """
+    🔥 NUEVO: Genera regex donde CADA PALABRA es opcional (para búsquedas flexibles)
+    Útil para cuando el usuario puede omitir palabras.
+    """
+    regex_base = generar_regex_liveperson(frase, usar_sustituciones, usar_h_muda, espacios_opcionales=True)
+    
+    # Hacer que cada grupo de palabra sea opcional
+    # Esto permite que falten palabras en medio de la frase
+    # Ej: "hola mundo" detectará "hola", "mundo", "hola mundo"
+    
+    # Dividimos el regex en grupos de palabras
+    # Buscamos patrones como (palabra) separados por \s*
+    patron_grupos = r'\([^)]+\)'  # Encuentra (contenido)
+    grupos = re.findall(patron_grupos, regex_base)
+    
+    if len(grupos) > 1:
+        # Hacemos cada grupo opcional con ?
+        grupos_opcionales = [f"{grupo}?" for grupo in grupos]
+        regex_opcional = r'\s*'.join(grupos_opcionales)
+        return regex_opcional
+    else:
+        return regex_base
+
+def mostrar_ejemplos_espacios():
+    """Muestra ejemplos de detección con espacios opcionales."""
     print("\n" + "="*60)
-    print("🔤 **DETECCIÓN DE H MUDA (ejemplos):**")
+    print("📝 **DETECCIÓN CON ESPACIOS OPCIONALES:**")
     print("="*60)
-    print("  'hola'     → detecta: 'hola', 'ola', 'hóla'")
-    print("  'hecho'    → detecta: 'hecho', 'echo', 'echó'")
-    print("  'haber'    → detecta: 'haber', 'aber', 'a ver'")
-    print("  'hacer'    → detecta: 'hacer', 'aser', 'hazer'")
-    print("  'hijo'     → detecta: 'hijo', 'ijo'")
-    print("  'hasta'    → detecta: 'hasta', 'asta'")
-    print("  'huevo'    → detecta: 'huevo', 'uevo', 'huebo'")
-    print("  'hermano'  → detecta: 'hermano', 'ermano'")
+    print("  Modo NORMAL (espacios requeridos):")
+    print("    'hola mundo' → detecta 'hola mundo'")
+    print("    'hola mundo' → NO detecta 'holamundo'")
+    print()
+    print("  Modo FLEXIBLE (espacios opcionales):")
+    print("    'hola mundo' → detecta 'hola mundo', 'holamundo'")
+    print("    'a ver'      → detecta 'aver', 'a ver'")
+    print("    'por favor'  → detecta 'porfavor', 'x favor', 'xfavor'")
     print("="*60 + "\n")
+
+def mostrar_comparativa(frase, regex_normal, regex_flexible):
+    """Muestra una comparativa visual de los regex generados."""
+    print("\n📊 **COMPARATIVA DE MODOS:**")
+    print("-" * 60)
+    print("🔴 MODO ESTRICTO (espacios obligatorios):")
+    print(f"   {regex_normal}")
+    print("\n🟢 MODO FLEXIBLE (espacios opcionales):")
+    print(f"   {regex_flexible}")
+    print("-" * 60)
 
 # --- Ejemplo de uso y pruebas ---
 if __name__ == "__main__":
     print("🚀 **Generador de Regex para LivePerson Conversation Builder**")
-    print("   Con soporte para H MUDA y sustituciones de palabras\n")
+    print("   Con soporte para ESPACIOS OPCIONALES + H muda\n")
     
-    mostrar_ejemplos_h_muda()
+    mostrar_ejemplos_espacios()
     
     while True:
         frase_usuario = input("👉 Escribe la frase para generar el regex (o 'salir'): ")
@@ -229,48 +244,78 @@ if __name__ == "__main__":
             print("👋 ¡Hasta luego!")
             break
         
-        # Generamos versiones para comparar
-        regex_completo = generar_regex_liveperson(frase_usuario, usar_sustituciones=True, usar_h_muda=True)
-        regex_sin_h = generar_regex_liveperson(frase_usuario, usar_sustituciones=True, usar_h_muda=False)
+        # Generamos diferentes versiones
+        regex_estricto = generar_regex_liveperson(
+            frase_usuario, 
+            usar_sustituciones=True, 
+            usar_h_muda=True, 
+            espacios_opcionales=False
+        )
+        
+        regex_flexible = generar_regex_liveperson(
+            frase_usuario, 
+            usar_sustituciones=True, 
+            usar_h_muda=True, 
+            espacios_opcionales=True
+        )
+        
+        # Versión con palabras opcionales (pueden faltar)
+        regex_palabras_opcionales = generar_regex_con_grupos_opcionales(
+            frase_usuario,
+            usar_sustituciones=True,
+            usar_h_muda=True
+        )
         
         print("\n✅ **EXPRESIONES REGULARES GENERADAS:**")
-        print(f"   🔥 Completa (con H muda): {regex_completo}")
-        print(f"   📝 Sin detección de H:    {regex_sin_h}\n")
+        mostrar_comparativa(frase_usuario, regex_estricto, regex_flexible)
         
-        # Prueba con casos que incluyen H muda
-        if any(palabra in frase_usuario.lower() for palabra in ['hola', 'hecho', 'haber', 'hacer', 'hijo', 'hasta']):
-            print("🧪 **PRUEBA DE DETECCIÓN DE H MUDA:**")
-            
-            # Generar casos de prueba según la frase
-            casos_prueba = [frase_usuario]
-            
-            # Añadir variantes sin H
-            if 'hola' in frase_usuario.lower():
-                casos_prueba.append(frase_usuario.lower().replace('hola', 'ola'))
-                casos_prueba.append(frase_usuario.lower().replace('hola', 'hóla'))
-            if 'hecho' in frase_usuario.lower():
-                casos_prueba.append(frase_usuario.lower().replace('hecho', 'echo'))
-                casos_prueba.append(frase_usuario.lower().replace('hecho', 'echó'))
-            if 'haber' in frase_usuario.lower():
-                casos_prueba.append(frase_usuario.lower().replace('haber', 'aber'))
-                casos_prueba.append(frase_usuario.lower().replace('haber', 'a ver'))
-            if 'hacer' in frase_usuario.lower():
-                casos_prueba.append(frase_usuario.lower().replace('hacer', 'aser'))
-            if 'hijo' in frase_usuario.lower():
-                casos_prueba.append(frase_usuario.lower().replace('hijo', 'ijo'))
-            if 'hasta' in frase_usuario.lower():
-                casos_prueba.append(frase_usuario.lower().replace('hasta', 'asta'))
-            
-            # Añadir variante con mayúsculas y texto alrededor
-            casos_prueba.append(f"texto antes {frase_usuario} texto después")
-            casos_prueba.append(frase_usuario.upper())
-            
-            patron = re.compile(regex_completo, re.IGNORECASE)
-            print("\n   Resultados de la prueba:")
-            for caso in casos_prueba:
-                if patron.search(caso):
-                    print(f"   ✓ DETECTADO: '{caso}'")
-                else:
-                    print(f"   ✗ NO DETECTADO: '{caso}'")
+        print("\n🎯 **VERSIÓN CON PALABRAS OPCIONALES** (permite omitir palabras):")
+        print(f"   {regex_palabras_opcionales}")
+        print("   ℹ️  Útil cuando el usuario puede escribir frases incompletas")
+        
+        # Pruebas con diferentes combinaciones de espacios
+        print("\n🧪 **PRUEBA DE DETECCIÓN CON ESPACIOS OPCIONALES:**")
+        
+        # Generar casos de prueba
+        casos_prueba = [
+            frase_usuario,  # Original
+            frase_usuario.replace(' ', ''),  # Sin espacios
+            frase_usuario.replace(' ', '  '),  # Múltiples espacios
+        ]
+        
+        # Añadir variantes con sustituciones
+        if 'por' in frase_usuario.lower():
+            casos_prueba.append(frase_usuario.lower().replace('por', 'x'))
+            casos_prueba.append(frase_usuario.lower().replace('por', 'x').replace(' ', ''))
+        
+        if 'hola' in frase_usuario.lower():
+            casos_prueba.append(frase_usuario.lower().replace('hola', 'ola'))
+            casos_prueba.append(frase_usuario.lower().replace('hola', 'ola').replace(' ', ''))
+        
+        if 'a ver' in frase_usuario.lower() or 'haber' in frase_usuario.lower():
+            casos_prueba.append('aver')
+            casos_prueba.append('a ver')
+        
+        # Añadir texto alrededor
+        casos_prueba.append(f"texto antes {frase_usuario} texto después")
+        casos_prueba.append(f"texto antes{frase_usuario.replace(' ', '')}texto después")
+        
+        # Probar con regex flexible
+        patron_flexible = re.compile(regex_flexible, re.IGNORECASE)
+        patron_estricto = re.compile(regex_estricto, re.IGNORECASE)
+        
+        print("\n   Resultados (MODO FLEXIBLE - espacios opcionales):")
+        for caso in casos_prueba:
+            if patron_flexible.search(caso):
+                print(f"   ✓ DETECTADO: '{caso}'")
+            else:
+                print(f"   ✗ NO DETECTADO: '{caso}'")
+        
+        # Mostrar casos que el modo estricto NO detectaría
+        print("\n   🔍 Casos que SOLO el modo flexible detecta:")
+        casos_sin_espacios = [c for c in casos_prueba if ' ' not in c and len(c) > 0]
+        for caso in casos_sin_espacios[:3]:  # Mostrar máximo 3 ejemplos
+            if patron_flexible.search(caso) and not patron_estricto.search(caso):
+                print(f"   ✓ '{caso}' (detectado solo por modo flexible)")
         
         print("\n" + "-"*60 + "\n")
