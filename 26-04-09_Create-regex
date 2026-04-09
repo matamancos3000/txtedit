@@ -1,0 +1,139 @@
+import unicodedata
+import re
+
+variaciones = {
+    'a': '(a|á|à|ä|â)',
+    'e': '(e|é|è|ë|ê)',
+    'i': '(i|í|ì|ï|î)',
+    'o': '(o|ó|ò|ö|ô)',
+    'u': '(u|ú|ù|ü|û)',
+    'n': '(n|ñ|m)',    # n puede ser ñ o m
+    'ñ': '(ñ|n)',      # ñ puede ser n
+    'm': '(m|n|ñ)',    # m puede ser n o ñ
+    'g': '(g|j)',
+    'j': '(j|g)',
+    's': '(s|z)',
+    'z': '(z|s)',
+    'b': '(b|v)',
+    'v': '(v|b)',
+    'c': '(c|k|q)',
+    'k': '(k|c|q)',
+    'q': '(q|c|k)',
+    'y': '(y|ll)',
+    'll': '(ll|y)'
+}
+
+def quitar_acentos(texto):
+    """Elimina acentos pero preserva la ñ"""
+    # Normalizamos a forma descompuesta
+    texto_nfd = unicodedata.normalize('NFD', texto)
+    
+    # Filtramos solo caracteres que no son marcas diacríticas
+    # pero preservamos la ñ (U+00F1) y su forma descompuesta (n + ~)
+    resultado = []
+    skip_next = False
+    
+    for i, c in enumerate(texto_nfd):
+        if skip_next:
+            skip_next = False
+            continue
+            
+        # Si es una n seguida de tilde (U+0303), es una ñ descompuesta
+        if c == 'n' and i+1 < len(texto_nfd) and texto_nfd[i+1] == '̃':
+            resultado.append('ñ')
+            skip_next = True
+        # Si es un carácter diacrítico, lo saltamos
+        elif unicodedata.category(c) == 'Mn':
+            continue
+        else:
+            resultado.append(c)
+    
+    return ''.join(resultado)
+
+def generar_regex_palabra(palabra, modo_estricto=False):
+    """
+    Genera regex para una palabra
+    
+    Args:
+        palabra: Palabra a procesar
+        modo_estricto: Si True, no hace opcionales las variaciones
+    """
+    regex = ""
+    opcional = '?' if not modo_estricto else ''
+    
+    for char in palabra:
+        if char in variaciones:
+            regex += f"{variaciones[char]}{opcional}"
+        else:
+            regex += char
+    
+    return regex
+
+def generar_regex_frase(frase, modo_estricto=False, palabras_exactas=False):
+    """Genera regex para una frase completa"""
+    frase = frase.lower().strip()
+    frase = quitar_acentos(frase)
+    
+    palabras = frase.split()
+    regex_palabras = []
+    
+    for palabra in palabras:
+        base = generar_regex_palabra(palabra, modo_estricto)
+        if palabras_exactas:
+            base = rf'\b{base}\b'
+        regex_palabras.append(f"({base})")
+    
+    # Espacios flexibles o estrictos
+    separador = r"\s+" if modo_estricto else r"\s*"
+    regex_final = separador.join(regex_palabras)
+    
+    # Permitir texto antes y después
+    regex_final = f".*{regex_final}.*"
+    
+    return regex_final
+
+# 🔥 Prueba interactiva
+print("🔎 Generador de REGEX con soporte para Ñ")
+print("Comandos: 'salir', 'test ñ' para probar\n")
+
+while True:
+    frase = input("👉 Escribe tu frase: ")
+    
+    if frase.lower() == "salir":
+        print("👋 Bye!")
+        break
+    
+    if frase.lower() == "test ñ":
+        print("\n🧪 Probando con palabras que tienen Ñ:")
+        casos = ["año", "niño", "mañana", "campaña"]
+        for caso in casos:
+            regex = generar_regex_frase(caso)
+            print(f"\n'{caso}' → {regex}")
+            # Probar variaciones comunes
+            variantes = [
+                caso,  # original
+                caso.replace('ñ', 'n'),  # ñ -> n
+                caso.replace('ñ', 'ni'),  # ñ -> ni (ej: año -> anio)
+                caso.upper()  # mayúsculas
+            ]
+            patron = re.compile(regex, re.IGNORECASE)
+            print("  Variaciones que detecta:")
+            for v in variantes:
+                if patron.search(v):
+                    print(f"    ✓ {v}")
+        print()
+        continue
+    
+    # Modos disponibles
+    print("\n🎚️ Opciones:")
+    print("  1. Modo flexible (default) - detecta más variaciones")
+    print("  2. Modo estricto - solo variaciones exactas")
+    modo = input("  Elige modo (1/2, Enter para flexible): ").strip()
+    
+    estricto = modo == "2"
+    regex = generar_regex_frase(frase, modo_estricto=estricto)
+    
+    print("\n✅ Regex generado:\n")
+    print(regex)
+    print(f"\n📝 Buscará: '{frase}'" + (" (modo estricto)" if estricto else " (modo flexible)"))
+    print("-"*50 + "\n")
