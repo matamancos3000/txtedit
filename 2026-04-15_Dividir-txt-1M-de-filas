@@ -1,0 +1,104 @@
+import pandas as pd
+import os
+from pathlib import Path
+
+def dividir_txt_a_excel(archivo_txt, filas_por_archivo=1000000, separador='|'):
+    """
+    Divide un archivo TXT grande en múltiples archivos Excel
+    
+    Parámetros:
+    archivo_txt: ruta del archivo TXT de entrada
+    filas_por_archivo: número de filas por cada archivo Excel (default: 1,000,000)
+    separador: separador usado en el TXT (default: '|')
+    """
+    
+    # Obtener la carpeta donde está el script o archivo
+    carpeta_actual = Path.cwd() if not os.path.dirname(archivo_txt) else Path(archivo_txt).parent
+    
+    print(f"📂 Leyendo archivo: {archivo_txt}")
+    print(f"📁 Guardando en: {carpeta_actual}")
+    print(f"📊 Procesando... esto puede tomar varios minutos debido al tamaño del archivo")
+    
+    # Contador de archivos y filas
+    num_archivo = 1
+    filas_procesadas = 0
+    
+    # Leer el archivo en chunks
+    chunk_size = 100000  # Leer de 100k en 100k filas para no saturar memoria
+    chunk_actual = []
+    
+    try:
+        with open(archivo_txt, 'r', encoding='utf-8') as file:
+            # Leer primera línea para detectar encabezados
+            primera_linea = file.readline().strip()
+            encabezados = primera_linea.split(separador)
+            chunk_actual.append(primera_linea.split(separador))
+            filas_procesadas = 1
+            
+            # Procesar el resto del archivo
+            for linea in file:
+                filas_procesadas += 1
+                datos = linea.strip().split(separador)
+                
+                # Si la línea tiene diferente número de columnas, ajustar
+                if len(datos) != len(encabezados):
+                    # Rellenar o truncar según sea necesario
+                    if len(datos) < len(encabezados):
+                        datos.extend([''] * (len(encabezados) - len(datos)))
+                    else:
+                        datos = datos[:len(encabezados)]
+                
+                chunk_actual.append(datos)
+                
+                # Cuando alcanzamos el límite de filas, guardar el archivo
+                if len(chunk_actual) >= filas_por_archivo:
+                    guardar_excel(chunk_actual, encabezados, carpeta_actual, num_archivo)
+                    print(f"✅ Guardado archivo parte {num_archivo} - {len(chunk_actual):,} filas")
+                    num_archivo += 1
+                    chunk_actual = []  # Reiniciar chunk
+            
+            # Guardar el último chunk si tiene datos
+            if chunk_actual:
+                guardar_excel(chunk_actual, encabezados, carpeta_actual, num_archivo)
+                print(f"✅ Guardado archivo parte {num_archivo} - {len(chunk_actual):,} filas")
+        
+        print(f"\n🎉 ¡Proceso completado!")
+        print(f"📊 Total de filas procesadas: {filas_procesadas:,}")
+        print(f"📁 Archivos generados: {num_archivo}")
+        
+    except Exception as e:
+        print(f"❌ Error al procesar el archivo: {str(e)}")
+
+def guardar_excel(datos, encabezados, carpeta, num_parte):
+    """
+    Guarda un chunk de datos como archivo Excel
+    """
+    try:
+        # Crear DataFrame
+        df = pd.DataFrame(datos, columns=encabezados)
+        
+        # Nombre del archivo
+        nombre_archivo = carpeta / f"parte_{num_parte:04d}.xlsx"
+        
+        # Guardar como Excel
+        df.to_excel(nombre_archivo, index=False, engine='openpyxl')
+        
+    except Exception as e:
+        print(f"❌ Error al guardar el archivo parte {num_parte}: {str(e)}")
+
+# Uso del script
+if __name__ == "__main__":
+    # Configuración
+    NOMBRE_ARCHIVO = "tu_archivo.txt"  # Cambia por el nombre de tu archivo
+    FILAS_POR_ARCHIVO = 1000000  # 1 millón de filas por archivo
+    
+    # Verificar si el archivo existe
+    if not os.path.exists(NOMBRE_ARCHIVO):
+        print(f"❌ El archivo '{NOMBRE_ARCHIVO}' no existe en la carpeta actual")
+        print(f"📁 Carpeta actual: {os.getcwd()}")
+        print("\n📝 Por favor, asegúrate de:")
+        print("1. Colocar el script en la misma carpeta que tu archivo TXT")
+        print("2. Cambiar la variable 'NOMBRE_ARCHIVO' con el nombre correcto de tu archivo")
+    else:
+        print("🚀 Iniciando proceso de división...")
+        dividir_txt_a_excel(NOMBRE_ARCHIVO, FILAS_POR_ARCHIVO)
