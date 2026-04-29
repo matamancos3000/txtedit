@@ -1,0 +1,2 @@
+-Transferir y pagar
+\b(t+r+a+n?s*f+e?r+[ií]+r?)\s*(y|&|e)\s*(a+p+a+g+(?:a|u)a?r?)\b
