@@ -1,75 +1,89 @@
 import os
-import pdfplumber
-from docx import Document
-from docx.shared import Inches
-import io
-from PIL import Image
+import subprocess
+import sys
 
-def convertir_con_pdfplumber(carpeta_origen):
+def instalar_version_correcta():
+    """Instala la versión de pdf2docx que NO tiene el error get_area"""
+    print("📦 Instalando versión correcta de pdf2docx...")
+    
+    # Desinstalar cualquier versión existente
+    subprocess.run([sys.executable, "-m", "pip", "uninstall", "pdf2docx", "-y"], 
+                   capture_output=True)
+    
+    # Instalar versión específica que funciona
+    subprocess.run([sys.executable, "-m", "pip", "install", "pdf2docx==0.5.5"], 
+                   capture_output=True)
+    
+    print("✅ Instalación completada")
+
+def convertir_con_pdf2docx_fixed(carpeta_origen):
     """
-    Convierte PDF a Word preservando texto e imágenes
+    Convierte PDF a Word usando la versión CORRECTA de pdf2docx
     """
-    # Verificar carpeta
+    # Verificar/instalar versión correcta
+    try:
+        from pdf2docx import Converter
+        
+        # Prueba rápida para verificar que no hay error
+        test_import = Converter
+    except AttributeError as e:
+        if 'get_area' in str(e):
+            print("⚠️ Error detectado. Instalando versión correcta...")
+            instalar_version_correcta()
+            from pdf2docx import Converter
+    except ImportError:
+        print("📦 Instalando pdf2docx...")
+        instalar_version_correcta()
+        from pdf2docx import Converter
+    
+    # Validar carpeta
     if not os.path.isdir(carpeta_origen):
-        print(f"❌ Error: '{carpeta_origen}' no es una carpeta válida")
+        print(f"❌ Error: '{carpeta_origen}' no es válida")
         return
     
     # Buscar PDFs
     pdfs = [f for f in os.listdir(carpeta_origen) if f.lower().endswith('.pdf')]
     
     if not pdfs:
-        print(f"⚠️ No se encontraron PDFs en: {carpeta_origen}")
+        print(f"⚠️ No hay PDFs en: {carpeta_origen}")
         return
     
     print(f"\n📁 Carpeta: {carpeta_origen}")
     print(f"📄 PDFs encontrados: {len(pdfs)}\n")
     
+    convertidos = 0
+    errores = 0
+    
     for pdf_file in pdfs:
         pdf_path = os.path.join(carpeta_origen, pdf_file)
         docx_path = os.path.join(carpeta_origen, pdf_file.replace('.pdf', '.docx'))
         
-        print(f"🔄 Procesando: {pdf_file}")
+        if os.path.exists(docx_path):
+            print(f"⏭️ Omitiendo {pdf_file} (ya existe)")
+            continue
+        
+        print(f"🔄 Convirtiendo: {pdf_file}")
         
         try:
-            # Crear documento Word
-            doc_word = Document()
+            cv = Converter(pdf_path)
+            cv.convert(docx_path, start=0, end=None)
+            cv.close()
             
-            # Abrir PDF con pdfplumber
-            with pdfplumber.open(pdf_path) as pdf:
-                for page_num, page in enumerate(pdf.pages):
-                    print(f"   📄 Página {page_num + 1}/{len(pdf.pages)}")
-                    
-                    # Extraer texto
-                    texto = page.extract_text()
-                    if texto:
-                        doc_word.add_paragraph(f"--- Página {page_num + 1} ---")
-                        doc_word.add_paragraph(texto)
-                    else:
-                        doc_word.add_paragraph(f"--- Página {page_num + 1} (sin texto) ---")
-                    
-                    # Extraer imágenes de esta página
-                    if page.images:
-                        for img_idx, img in enumerate(page.images):
-                            try:
-                                # Extraer la imagen como bytes
-                                # Nota: pdfplumber no extrae directamente, usamos PyMuPDF para imágenes
-                                pass
-                            except:
-                                pass
-                    
-                    # Salto de página excepto en la última
-                    if page_num < len(pdf.pages) - 1:
-                        doc_word.add_page_break()
-            
-            # Guardar documento
-            doc_word.save(docx_path)
-            print(f"   ✅ Convertido: {docx_path}\n")
+            convertidos += 1
+            print(f"   ✅ Éxito: {docx_path}\n")
             
         except Exception as e:
+            errores += 1
             print(f"   ❌ Error: {e}\n")
+    
+    print(f"\n{'='*50}")
+    print(f"✅ Convertidos: {convertidos}")
+    print(f"❌ Errores: {errores}")
+    print(f"{'='*50}")
 
 # Uso
 if __name__ == "__main__":
-    # Cambia esta ruta por la tuya
-    CARPETA = r"C:\Tu\Carpeta\De\PDFs"
-    convertir_con_pdfplumber(CARPETA)
+    # CAMBIA ESTA RUTA POR LA TUYA
+    CARPETA = r"C:\Users\TuUsuario\Documentos\PDFs"
+    
+    convertir_con_pdf2docx_fixed(CARPETA)
