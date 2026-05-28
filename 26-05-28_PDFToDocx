@@ -1,40 +1,56 @@
 import os
 import subprocess
 import sys
+import traceback
 
 def instalar_version_correcta():
-    """Instala la versión de pdf2docx que NO tiene el error get_area"""
+    """Instala la versión de pdf2docx que mejor funciona para imágenes"""
     print("📦 Instalando versión correcta de pdf2docx...")
     
     # Desinstalar cualquier versión existente
     subprocess.run([sys.executable, "-m", "pip", "uninstall", "pdf2docx", "-y"], 
                    capture_output=True)
     
-    # Instalar versión específica que funciona
-    subprocess.run([sys.executable, "-m", "pip", "install", "pdf2docx==0.5.5"], 
-                   capture_output=True)
+    # Probar con diferentes versiones (la 0.5.6 a veces funciona mejor)
+    versiones = ["pdf2docx==0.5.6", "pdf2docx==0.5.5", "pdf2docx==0.5.4"]
     
-    print("✅ Instalación completada")
+    for version in versiones:
+        print(f"   Probando {version}...")
+        resultado = subprocess.run([sys.executable, "-m", "pip", "install", version], 
+                                   capture_output=True)
+        if resultado.returncode == 0:
+            print(f"   ✅ Instalado {version}")
+            # Probar si funciona
+            try:
+                from pdf2docx import Converter
+                print("   ✅ Versión funcional")
+                return True
+            except:
+                continue
+    
+    print("❌ No se pudo instalar una versión funcional")
+    return False
 
-def convertir_con_pdf2docx_fixed(carpeta_origen):
+def convertir_con_pdf2docx_mejorado(carpeta_origen):
     """
-    Convierte PDF a Word usando la versión CORRECTA de pdf2docx
+    Convierte PDF a Word conservando imágenes, con mejor manejo de errores
     """
-    # Verificar/instalar versión correcta
+    # Intentar importar pdf2docx
     try:
         from pdf2docx import Converter
-        
-        # Prueba rápida para verificar que no hay error
-        test_import = Converter
-    except AttributeError as e:
-        if 'get_area' in str(e):
-            print("⚠️ Error detectado. Instalando versión correcta...")
-            instalar_version_correcta()
-            from pdf2docx import Converter
+        print("✅ pdf2docx cargado correctamente")
     except ImportError:
         print("📦 Instalando pdf2docx...")
-        instalar_version_correcta()
+        if not instalar_version_correcta():
+            print("❌ No se pudo instalar. Usando método alternativo...")
+            convertir_sin_pdf2docx(carpeta_origen)
+            return
         from pdf2docx import Converter
+    except AttributeError as e:
+        if 'get_area' in str(e):
+            print("⚠️ Error get_area detectado. Reinstalando...")
+            instalar_version_correcta()
+            from pdf2docx import Converter
     
     # Validar carpeta
     if not os.path.isdir(carpeta_origen):
@@ -65,25 +81,213 @@ def convertir_con_pdf2docx_fixed(carpeta_origen):
         print(f"🔄 Convirtiendo: {pdf_file}")
         
         try:
+            # Intentar conversión con diferentes parámetros
             cv = Converter(pdf_path)
+            
+            # Convertir página por página para mejor manejo de errores
             cv.convert(docx_path, start=0, end=None)
             cv.close()
             
             convertidos += 1
             print(f"   ✅ Éxito: {docx_path}\n")
             
+        except AttributeError as e:
+            if 'get_area' in str(e):
+                print(f"   ⚠️ Error get_area en {pdf_file}")
+                print(f"   🔄 Intentando método alternativo con PyMuPDF...")
+                if convertir_con_pymupdf(pdf_path, docx_path):
+                    convertidos += 1
+                    print(f"   ✅ Convertido con método alternativo\n")
+                else:
+                    errores += 1
+                    print(f"   ❌ Error también en método alternativo\n")
+            else:
+                errores += 1
+                print(f"   ❌ Error: {e}\n")
+                
         except Exception as e:
             errores += 1
-            print(f"   ❌ Error: {e}\n")
+            print(f"   ❌ Error: {e}")
+            print(f"   🔄 Intentando método alternativo...")
+            if convertir_con_pymupdf(pdf_path, docx_path):
+                convertidos += 1
+                errores -= 1
+                print(f"   ✅ Convertido con método alternativo\n")
+            else:
+                print(f"   ❌ Falló completamente\n")
     
     print(f"\n{'='*50}")
     print(f"✅ Convertidos: {convertidos}")
     print(f"❌ Errores: {errores}")
     print(f"{'='*50}")
 
+def convertir_con_pymupdf(pdf_path, docx_path):
+    """
+    Método alternativo usando PyMuPDF que conserva imágenes
+    """
+    try:
+        import fitz  # PyMuPDF
+        from docx import Document
+        from docx.shared import Inches
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        import io
+        from PIL import Image
+        
+        print(f"   📄 Usando PyMuPDF para conservar imágenes...")
+        
+        # Abrir PDF
+        doc_pdf = fitz.open(pdf_path)
+        doc_word = Document()
+        
+        for pagina_num in range(len(doc_pdf)):
+            pagina = doc_pdf[pagina_num]
+            
+            print(f"      Procesando página {pagina_num + 1}/{len(doc_pdf)}")
+            
+            # Extraer texto
+            texto = pagina.get_text()
+            if texto.strip():
+                parrafo = doc_word.add_paragraph()
+                parrafo.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                run = parrafo.add_run(f"--- Página {pagina_num + 1} ---\n\n")
+                run = parrafo.add_run(texto)
+            
+            # Extraer imágenes de la página
+            imagenes = pagina.get_images()
+            
+            for img_idx, img in enumerate(imagenes):
+                try:
+                    xref = img[0]
+                    base_image = doc_pdf.extract_image(xref)
+                    image_bytes = base_image["image"]
+                    image_ext = base_image["ext"]
+                    
+                    # Crear imagen desde bytes
+                    image_stream = io.BytesIO(image_bytes)
+                    
+                    # Agregar al documento Word
+                    parrafo_img = doc_word.add_paragraph()
+                    parrafo_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run = parrafo_img.add_run()
+                    
+                    # Agregar imagen (máximo 6 pulgadas de ancho)
+                    try:
+                        run.add_picture(image_stream, width=Inches(5))
+                    except:
+                        # Si falla, intentar con PIL
+                        img_pil = Image.open(io.BytesIO(image_bytes))
+                        img_pil.save(image_stream, format='PNG')
+                        image_stream.seek(0)
+                        run.add_picture(image_stream, width=Inches(5))
+                    
+                    print(f"         ✓ Imagen {img_idx + 1} extraída")
+                    
+                except Exception as e:
+                    print(f"         ⚠️ No se pudo extraer imagen {img_idx + 1}: {e}")
+            
+            # Salto de página excepto en la última
+            if pagina_num < len(doc_pdf) - 1:
+                doc_word.add_page_break()
+        
+        # Cerrar PDF y guardar Word
+        doc_pdf.close()
+        doc_word.save(docx_path)
+        
+        return True
+        
+    except ImportError:
+        print("   ❌ PyMuPDF no está instalado. Instala con: pip install PyMuPDF pillow")
+        return False
+    except Exception as e:
+        print(f"   ❌ Error en PyMuPDF: {e}")
+        return False
+
+def convertir_sin_pdf2docx(carpeta_origen):
+    """
+    Conversión directa usando solo PyMuPDF (más confiable para imágenes)
+    """
+    print("\n📦 Usando PyMuPDF como método principal (mejor para imágenes)\n")
+    
+    try:
+        import fitz
+        from docx import Document
+        from docx.shared import Inches
+        import io
+    except ImportError:
+        print("❌ Instala las dependencias: pip install PyMuPDF python-docx pillow")
+        return
+    
+    pdfs = [f for f in os.listdir(carpeta_origen) if f.lower().endswith('.pdf')]
+    
+    if not pdfs:
+        print(f"⚠️ No hay PDFs en: {carpeta_origen}")
+        return
+    
+    convertidos = 0
+    
+    for pdf_file in pdfs:
+        pdf_path = os.path.join(carpeta_origen, pdf_file)
+        docx_path = os.path.join(carpeta_origen, pdf_file.replace('.pdf', '.docx'))
+        
+        print(f"🔄 Procesando: {pdf_file}")
+        
+        try:
+            doc_pdf = fitz.open(pdf_path)
+            doc_word = Document()
+            
+            for pagina_num in range(len(doc_pdf)):
+                pagina = doc_pdf[pagina_num]
+                
+                # Agregar texto
+                texto = pagina.get_text()
+                doc_word.add_paragraph(f"--- Página {pagina_num + 1} ---")
+                if texto.strip():
+                    doc_word.add_paragraph(texto)
+                
+                # Agregar imágenes
+                for img in pagina.get_images():
+                    try:
+                        xref = img[0]
+                        base_image = doc_pdf.extract_image(xref)
+                        image_bytes = base_image["image"]
+                        image_stream = io.BytesIO(image_bytes)
+                        
+                        parrafo = doc_word.add_paragraph()
+                        run = parrafo.add_run()
+                        run.add_picture(image_stream, width=Inches(5))
+                    except:
+                        pass
+                
+                if pagina_num < len(doc_pdf) - 1:
+                    doc_word.add_page_break()
+            
+            doc_pdf.close()
+            doc_word.save(docx_path)
+            
+            convertidos += 1
+            print(f"   ✅ Convertido: {docx_path}\n")
+            
+        except Exception as e:
+            print(f"   ❌ Error: {e}\n")
+    
+    print(f"\n✅ Convertidos: {convertidos} de {len(pdfs)}")
+
 # Uso
 if __name__ == "__main__":
     # CAMBIA ESTA RUTA POR LA TUYA
     CARPETA = r"C:\Users\TuUsuario\Documentos\PDFs"
     
-    convertir_con_pdf2docx_fixed(CARPETA)
+    # Opciones:
+    # 1. Intentar con pdf2docx (mejor formato, pero puede dar error get_area)
+    # 2. Usar directamente PyMuPDF (más confiable para imágenes)
+    
+    print("¿Cómo quieres convertir?")
+    print("1 - Intentar con pdf2docx (mejor formato, conserva más elementos)")
+    print("2 - Usar PyMuPDF directamente (más confiable, evita errores)")
+    
+    opcion = input("\nElige (1 o 2): ").strip()
+    
+    if opcion == "1":
+        convertir_con_pdf2docx_mejorado(CARPETA)
+    else:
+        convertir_sin_pdf2docx(CARPETA)
