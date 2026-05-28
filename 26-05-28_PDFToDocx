@@ -1,136 +1,230 @@
 import os
 import sys
-import subprocess
+from pathlib import Path
 
-def instalar_pdf2docx_correcto():
-    """Instala la versión correcta de pdf2docx"""
-    print("📦 Instalando la versión correcta de pdf2docx...")
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "pdf2docx", "-y"])
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "pdf2docx==0.5.6"])
-        print("✅ Instalación completada")
-        return True
-    except Exception as e:
-        print(f"❌ Error al instalar: {e}")
-        return False
+# Instalaciones necesarias:
+# pip install PyMuPDF pdf2docx pdf2image pytesseract python-docx pillow
 
-def convertir_pdf_fallback(pdf_path, docx_path):
+def verificar_pdf_con_texto(pdf_path):
     """
-    Función alternativa usando fitz (PyMuPDF) si pdf2docx falla
+    Verifica si el PDF contiene texto seleccionable o es solo imágenes
     """
     try:
-        import fitz
-        from docx import Document
+        import fitz  # PyMuPDF
         
         doc = fitz.open(pdf_path)
-        doc_word = Document()
+        tiene_texto = False
         
-        for pagina in doc:
-            texto = pagina.get_text()
-            doc_word.add_paragraph(texto)
+        # Revisar primeras páginas en busca de texto
+        for pagina_num in range(min(3, len(doc))):
+            pagina = doc[pagina_num]
+            texto = pagina.get_text().strip()
+            if len(texto) > 50:  # Si tiene más de 50 caracteres, asumimos que tiene texto
+                tiene_texto = True
+                break
         
-        doc_word.save(docx_path)
         doc.close()
-        return True
-    except:
+        return tiene_texto
+        
+    except Exception as e:
+        print(f"  ⚠️ Error al verificar PDF: {e}")
         return False
 
-def convertir_carpeta_seguro(ruta_carpeta):
+def convertir_pdf_con_ocr(pdf_path, docx_path, idioma='spa'):
     """
-    Convierte PDFs manejando el error de 'Rect'
+    Convierte PDF escaneado usando OCR (Tesseract)
     """
-    # Verificar/Instalar pdf2docx correctamente
-    try:
-        from pdf2docx import Converter
+    from pdf2image import convert_from_path
+    import pytesseract
+    from docx import Document
+    from PIL import Image
+    import tempfile
+    import shutil
+    
+    # Configurar ruta de Tesseract (Windows)
+    if sys.platform == "win32":
+        # Cambia esta ruta si instalaste Tesseract en otra ubicación
+        tesseract_paths = [
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        ]
+        for path in tesseract_paths:
+            if os.path.exists(path):
+                pytesseract.pytesseract.tesseract_cmd = path
+                break
+    
+    # Crear documento Word
+    doc_word = Document()
+    
+    # Convertir PDF a imágenes
+    print(f"    📄 Convirtiendo PDF a imágenes...")
+    imagenes = convert_from_path(pdf_path, dpi=300)
+    
+    for i, img in enumerate(imagenes):
+        print(f"    🔍 Procesando página {i+1}/{len(imagenes)}...")
         
-        # Probar si funciona
-        test_pdf = None
+        # Aplicar OCR a la imagen
         try:
-            # Intento mínimo para verificar
-            pass
-        except AttributeError as e:
-            if 'get_area' in str(e):
-                print("⚠️  Error conocido de pdf2docx. Instalando versión correcta...")
-                if instalar_pdf2docx_correcto():
-                    from pdf2docx import Converter
-                else:
-                    return False
-    except ImportError:
-        print("❌ pdf2docx no instalado")
-        respuesta = input("¿Instalar versión correcta? (s/n): ").lower()
-        if respuesta == 's':
-            if instalar_pdf2docx_correcto():
-                from pdf2docx import Converter
-            else:
-                return False
-        else:
-            return False
-    
-    if not os.path.isdir(ruta_carpeta):
-        print(f"❌ Error: '{ruta_carpeta}' no es una carpeta válida")
-        return
-    
-    # Buscar PDFs
-    pdfs = [f for f in os.listdir(ruta_carpeta) if f.lower().endswith('.pdf')]
-    
-    if not pdfs:
-        print(f"⚠️  No se encontraron PDFs en: {ruta_carpeta}")
-        return
-    
-    print(f"\n📂 Carpeta: {ruta_carpeta}")
-    print(f"📄 Archivos PDF: {len(pdfs)}")
-    
-    for pdf_file in pdfs:
-        pdf_path = os.path.join(ruta_carpeta, pdf_file)
-        docx_path = os.path.join(ruta_carpeta, pdf_file.replace('.pdf', '.docx'))
-        
-        if os.path.exists(docx_path):
-            print(f"⏭️  Omitiendo {pdf_file} - ya existe")
-            continue
-        
-        print(f"\n🔄 Procesando: {pdf_file}")
-        
-        try:
-            # Intentar con pdf2docx
-            cv = Converter(pdf_path)
-            cv.convert(docx_path, start=0, end=None)
-            cv.close()
-            print(f"   ✅ Convertido (pdf2docx)")
+            texto = pytesseract.image_to_string(img, lang=idioma)
             
-        except AttributeError as e:
-            if 'get_area' in str(e):
-                print(f"   ⚠️  Error get_area, usando método alternativo...")
-                if convertir_pdf_fallback(pdf_path, docx_path):
-                    print(f"   ✅ Convertido (método alternativo)")
-                else:
-                    print(f"   ❌ Falló la conversión")
+            # Agregar texto al documento Word
+            if i > 0:
+                doc_word.add_page_break()
+            doc_word.add_paragraph(f"--- Página {i+1} ---")
+            
+            if texto.strip():
+                doc_word.add_paragraph(texto)
             else:
-                print(f"   ❌ Error: {e}")
+                doc_word.add_paragraph("[Página sin texto detectable]")
                 
         except Exception as e:
-            print(f"   ❌ Error general: {e}")
-            
-            # Intentar método alternativo
-            print(f"   🔄 Intentando método alternativo...")
-            if convertir_pdf_fallback(pdf_path, docx_path):
-                print(f"   ✅ Convertido (fallback)")
+            doc_word.add_paragraph(f"[Error al procesar página {i+1}: {e}]")
+    
+    # Guardar documento
+    doc_word.save(docx_path)
+    return True
+
+def convertir_pdf_normal(pdf_path, docx_path):
+    """
+    Convierte PDF con texto usando pdf2docx (mantiene formato)
+    """
+    from pdf2docx import Converter
+    
+    cv = Converter(pdf_path)
+    cv.convert(docx_path, start=0, end=None)
+    cv.close()
+    return True
+
+def convertir_carpeta_completa(carpeta_origen, carpeta_salida=None, idioma_ocr='spa'):
+    """
+    Convierte todos los PDFs de una carpeta, detectando automáticamente
+    si son escaneados o no
+    
+    Args:
+        carpeta_origen: Ruta de la carpeta con PDFs
+        carpeta_salida: Ruta donde guardar los Word (opcional)
+        idioma_ocr: Idioma para OCR ('spa', 'eng', 'spa+eng', etc.)
+    """
+    # Verificar dependencias
+    try:
+        import fitz
+        from pdf2docx import Converter
+        from pdf2image import convert_from_path
+        import pytesseract
+        from docx import Document
+        from PIL import Image
+    except ImportError as e:
+        print(f"❌ Error: Falta instalar una dependencia: {e}")
+        print("\n📦 Instala todo con:")
+        print("pip install PyMuPDF pdf2docx pdf2image pytesseract python-docx pillow")
+        return
+    
+    # Verificar Tesseract instalado
+    try:
+        import pytesseract
+        pytesseract.get_tesseract_version()
+    except Exception:
+        print("⚠️  Tesseract no está instalado o no está en el PATH")
+        print("   Descárgalo de: https://github.com/UB-Mannheim/tesseract/wiki")
+        print("   Para PDFs escaneados, la conversión fallará")
+    
+    # Validar carpetas
+    if not os.path.exists(carpeta_origen):
+        print(f"❌ Error: La carpeta '{carpeta_origen}' no existe")
+        return
+    
+    if not os.path.isdir(carpeta_origen):
+        print(f"❌ Error: '{carpeta_origen}' no es una carpeta")
+        return
+    
+    if carpeta_salida is None:
+        carpeta_salida = carpeta_origen
+    
+    os.makedirs(carpeta_salida, exist_ok=True)
+    
+    # Buscar archivos PDF
+    archivos_pdf = [f for f in os.listdir(carpeta_origen) if f.lower().endswith('.pdf')]
+    
+    if not archivos_pdf:
+        print(f"⚠️  No se encontraron archivos PDF en: {carpeta_origen}")
+        return
+    
+    print(f"\n{'='*60}")
+    print(f"📁 Carpeta de origen: {carpeta_origen}")
+    print(f"💾 Carpeta de destino: {carpeta_salida}")
+    print(f"📄 PDFs encontrados: {len(archivos_pdf)}")
+    print(f"🌐 Idioma OCR: {idioma_ocr}")
+    print(f"{'='*60}\n")
+    
+    convertidos = 0
+    errores = 0
+    escaneados = 0
+    normales = 0
+    
+    for pdf_file in archivos_pdf:
+        pdf_path = os.path.join(carpeta_origen, pdf_file)
+        docx_file = pdf_file.replace('.pdf', '.docx')
+        docx_path = os.path.join(carpeta_salida, docx_file)
+        
+        # Omitir si ya existe (opcional)
+        if os.path.exists(docx_path):
+            print(f"⏭️  Omitiendo {pdf_file} - ya existe {docx_file}")
+            continue
+        
+        print(f"\n📄 Procesando: {pdf_file}")
+        
+        # Detectar si el PDF tiene texto o es escaneado
+        print(f"    🔍 Analizando PDF...")
+        tiene_texto = verificar_pdf_con_texto(pdf_path)
+        
+        try:
+            if tiene_texto:
+                print(f"    ✅ PDF con texto detectable - Usando conversión rápida")
+                convertir_pdf_normal(pdf_path, docx_path)
+                normales += 1
+                print(f"    💾 Guardado como: {docx_file}")
             else:
-                print(f"   ❌ No se pudo convertir")
+                print(f"    📷 PDF escaneado (solo imágenes) - Usando OCR")
+                convertir_pdf_con_ocr(pdf_path, docx_path, idioma_ocr)
+                escaneados += 1
+                print(f"    💾 Guardado como: {docx_file}")
+            
+            convertidos += 1
+            
+        except Exception as e:
+            errores += 1
+            print(f"    ❌ Error: {str(e)}")
+    
+    # Resumen final
+    print(f"\n{'='*60}")
+    print(f"📊 RESUMEN DE CONVERSIÓN:")
+    print(f"   ✅ Exitosos: {convertidos}")
+    print(f"      - PDFs normales: {normales}")
+    print(f"      - PDFs escaneados (OCR): {escaneados}")
+    print(f"   ❌ Errores: {errores}")
+    print(f"   📁 Ubicación: {carpeta_salida}")
+    print(f"{'='*60}")
+
+def main():
+    # Configuración - ¡CAMBIA ESTAS RUTAS!
+    
+    # Ruta de la carpeta con tus PDFs
+    CARPETA_ORIGEN = r"C:\Users\TuUsuario\Documentos\PDFs"
+    
+    # Ruta donde guardar los Word (opcional, si es None usa la misma)
+    CARPETA_DESTINO = None  # o r"C:\Users\TuUsuario\Documentos\Word"
+    
+    # Idioma para OCR (spa=español, eng=inglés, puedes combinar: 'spa+eng')
+    IDIOMA_OCR = 'spa'
+    
+    # Si quieres pedir la carpeta al usuario, descomenta esto:
+    # if len(sys.argv) > 1:
+    #     CARPETA_ORIGEN = sys.argv[1]
+    # else:
+    #     CARPETA_ORIGEN = input("📂 Ingresa la ruta de la carpeta con PDFs: ").strip()
+    #     CARPETA_ORIGEN = CARPETA_ORIGEN.strip('"').strip("'")
+    
+    convertir_carpeta_completa(CARPETA_ORIGEN, CARPETA_DESTINO, IDIOMA_OCR)
 
 if __name__ == "__main__":
-    # Especificar la carpeta directamente aquí
-    CARPETA_ESPECIFICA = r"C:\Users\TuUsuario\Documentos\PDFs"  # <-- CAMBIA ESTA RUTA
-    
-    # O usar entrada del usuario
-    if len(sys.argv) > 1:
-        carpeta = sys.argv[1]
-    else:
-        # Descomenta la línea que prefieras:
-        
-        # Opción 1: Carpeta fija (edita la variable arriba)
-        carpeta = CARPETA_ESPECIFICA
-        
-        # Opción 2: Pedir al usuario
-        # carpeta = input("Ruta de la carpeta: ")
-    
-    convertir_carpeta_seguro(carpeta)
+    main()
