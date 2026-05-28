@@ -1,0 +1,136 @@
+import os
+import sys
+import subprocess
+
+def instalar_pdf2docx_correcto():
+    """Instala la versión correcta de pdf2docx"""
+    print("📦 Instalando la versión correcta de pdf2docx...")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "pdf2docx", "-y"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "pdf2docx==0.5.6"])
+        print("✅ Instalación completada")
+        return True
+    except Exception as e:
+        print(f"❌ Error al instalar: {e}")
+        return False
+
+def convertir_pdf_fallback(pdf_path, docx_path):
+    """
+    Función alternativa usando fitz (PyMuPDF) si pdf2docx falla
+    """
+    try:
+        import fitz
+        from docx import Document
+        
+        doc = fitz.open(pdf_path)
+        doc_word = Document()
+        
+        for pagina in doc:
+            texto = pagina.get_text()
+            doc_word.add_paragraph(texto)
+        
+        doc_word.save(docx_path)
+        doc.close()
+        return True
+    except:
+        return False
+
+def convertir_carpeta_seguro(ruta_carpeta):
+    """
+    Convierte PDFs manejando el error de 'Rect'
+    """
+    # Verificar/Instalar pdf2docx correctamente
+    try:
+        from pdf2docx import Converter
+        
+        # Probar si funciona
+        test_pdf = None
+        try:
+            # Intento mínimo para verificar
+            pass
+        except AttributeError as e:
+            if 'get_area' in str(e):
+                print("⚠️  Error conocido de pdf2docx. Instalando versión correcta...")
+                if instalar_pdf2docx_correcto():
+                    from pdf2docx import Converter
+                else:
+                    return False
+    except ImportError:
+        print("❌ pdf2docx no instalado")
+        respuesta = input("¿Instalar versión correcta? (s/n): ").lower()
+        if respuesta == 's':
+            if instalar_pdf2docx_correcto():
+                from pdf2docx import Converter
+            else:
+                return False
+        else:
+            return False
+    
+    if not os.path.isdir(ruta_carpeta):
+        print(f"❌ Error: '{ruta_carpeta}' no es una carpeta válida")
+        return
+    
+    # Buscar PDFs
+    pdfs = [f for f in os.listdir(ruta_carpeta) if f.lower().endswith('.pdf')]
+    
+    if not pdfs:
+        print(f"⚠️  No se encontraron PDFs en: {ruta_carpeta}")
+        return
+    
+    print(f"\n📂 Carpeta: {ruta_carpeta}")
+    print(f"📄 Archivos PDF: {len(pdfs)}")
+    
+    for pdf_file in pdfs:
+        pdf_path = os.path.join(ruta_carpeta, pdf_file)
+        docx_path = os.path.join(ruta_carpeta, pdf_file.replace('.pdf', '.docx'))
+        
+        if os.path.exists(docx_path):
+            print(f"⏭️  Omitiendo {pdf_file} - ya existe")
+            continue
+        
+        print(f"\n🔄 Procesando: {pdf_file}")
+        
+        try:
+            # Intentar con pdf2docx
+            cv = Converter(pdf_path)
+            cv.convert(docx_path, start=0, end=None)
+            cv.close()
+            print(f"   ✅ Convertido (pdf2docx)")
+            
+        except AttributeError as e:
+            if 'get_area' in str(e):
+                print(f"   ⚠️  Error get_area, usando método alternativo...")
+                if convertir_pdf_fallback(pdf_path, docx_path):
+                    print(f"   ✅ Convertido (método alternativo)")
+                else:
+                    print(f"   ❌ Falló la conversión")
+            else:
+                print(f"   ❌ Error: {e}")
+                
+        except Exception as e:
+            print(f"   ❌ Error general: {e}")
+            
+            # Intentar método alternativo
+            print(f"   🔄 Intentando método alternativo...")
+            if convertir_pdf_fallback(pdf_path, docx_path):
+                print(f"   ✅ Convertido (fallback)")
+            else:
+                print(f"   ❌ No se pudo convertir")
+
+if __name__ == "__main__":
+    # Especificar la carpeta directamente aquí
+    CARPETA_ESPECIFICA = r"C:\Users\TuUsuario\Documentos\PDFs"  # <-- CAMBIA ESTA RUTA
+    
+    # O usar entrada del usuario
+    if len(sys.argv) > 1:
+        carpeta = sys.argv[1]
+    else:
+        # Descomenta la línea que prefieras:
+        
+        # Opción 1: Carpeta fija (edita la variable arriba)
+        carpeta = CARPETA_ESPECIFICA
+        
+        # Opción 2: Pedir al usuario
+        # carpeta = input("Ruta de la carpeta: ")
+    
+    convertir_carpeta_seguro(carpeta)
