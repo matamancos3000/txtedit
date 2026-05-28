@@ -1,0 +1,116 @@
+import os
+import sys
+from pdf2docx import Converter
+from pathlib import Path
+
+def convertir_pdf_a_word(ruta_carpeta, salida_carpeta=None, mantener_estructura=True):
+    """
+    Convierte todos los archivos PDF de una carpeta a documentos de Word editables.
+    
+    Args:
+        ruta_carpeta (str): Ruta de la carpeta que contiene los PDFs
+        salida_carpeta (str, optional): Carpeta donde guardar los archivos Word.
+                                       Si es None, se guardan en la misma carpeta que los PDFs
+        mantener_estructura (bool): Si es True, mantiene la estructura de subcarpetas
+    """
+    
+    # Validar que la carpeta de origen existe
+    if not os.path.exists(ruta_carpeta):
+        print(f"Error: La carpeta '{ruta_carpeta}' no existe.")
+        return
+    
+    # Configurar carpeta de salida
+    if salida_carpeta is None:
+        salida_carpeta = ruta_carpeta
+    
+    # Crear carpeta de salida si no existe
+    os.makedirs(salida_carpeta, exist_ok=True)
+    
+    # Contadores
+    total_pdfs = 0
+    convertidos = 0
+    errores = 0
+    
+    print(f"Buscando archivos PDF en: {ruta_carpeta}")
+    print(f"Guardando archivos Word en: {salida_carpeta}")
+    print("-" * 60)
+    
+    # Recorrer todos los archivos PDF en la carpeta y subcarpetas
+    for root, dirs, files in os.walk(ruta_carpeta):
+        for archivo in files:
+            if archivo.lower().endswith('.pdf'):
+                total_pdfs += 1
+                
+                # Ruta completa del PDF
+                pdf_path = os.path.join(root, archivo)
+                
+                # Determinar la ruta de salida para el archivo Word
+                if mantener_estructura and salida_carpeta != ruta_carpeta:
+                    # Mantener la estructura de subcarpetas
+                    rel_path = os.path.relpath(root, ruta_carpeta)
+                    if rel_path == '.':
+                        output_dir = salida_carpeta
+                    else:
+                        output_dir = os.path.join(salida_carpeta, rel_path)
+                    os.makedirs(output_dir, exist_ok=True)
+                else:
+                    output_dir = salida_carpeta
+                
+                # Nombre del archivo Word (cambia extensión a .docx)
+                nombre_base = os.path.splitext(archivo)[0]
+                docx_path = os.path.join(output_dir, f"{nombre_base}.docx")
+                
+                print(f"\nConvirtiendo: {archivo}")
+                print(f"  De: {pdf_path}")
+                print(f"  A:  {docx_path}")
+                
+                try:
+                    # Convertir PDF a Word
+                    cv = Converter(pdf_path)
+                    cv.convert(docx_path, start=0, end=None)
+                    cv.close()
+                    
+                    convertidos += 1
+                    print(f"  ✓ Convertido exitosamente")
+                    
+                except Exception as e:
+                    errores += 1
+                    print(f"  ✗ Error al convertir: {str(e)}")
+    
+    # Mostrar resumen
+    print("-" * 60)
+    print(f"\nRESUMEN:")
+    print(f"  Total PDFs encontrados: {total_pdfs}")
+    print(f"  Convertidos exitosamente: {convertidos}")
+    print(f"  Errores: {errores}")
+    
+    if convertidos > 0:
+        print(f"\n✅ Conversión completada. Los archivos .docx están en: {salida_carpeta}")
+
+def main():
+    # Solicitar la carpeta al usuario
+    if len(sys.argv) > 1:
+        carpeta_origen = sys.argv[1]
+    else:
+        carpeta_origen = input("Ingresa la ruta de la carpeta con archivos PDF: ").strip()
+    
+    # Remover comillas si las tiene
+    carpeta_origen = carpeta_origen.strip('"').strip("'")
+    
+    # Preguntar si quiere una carpeta de salida específica
+    usar_salida_personalizada = input("\n¿Quieres guardar los archivos Word en otra carpeta? (s/n): ").strip().lower()
+    
+    if usar_salida_personalizada == 's':
+        carpeta_salida = input("Ingresa la ruta de la carpeta de salida: ").strip()
+        carpeta_salida = carpeta_salida.strip('"').strip("'")
+    else:
+        carpeta_salida = None
+    
+    # Preguntar si mantener estructura de subcarpetas
+    mantener_estructura = input("\n¿Mantener la estructura de subcarpetas? (s/n): ").strip().lower() == 's'
+    
+    # Ejecutar la conversión
+    convertir_pdf_a_word(carpeta_origen, carpeta_salida, mantener_estructura)
+
+if __name__ == "__main__":
+    main()
