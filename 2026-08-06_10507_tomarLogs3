@@ -2,7 +2,6 @@ import os
 import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-import locale
 
 # === CONFIGURACIÓN ===
 
@@ -11,15 +10,6 @@ base_paths = {
     "UAT": r"..\UAT\Output\Log",
     "PROD": r"..\PROD\Output\Log"
 }
-
-# Idioma de meses en español
-try:
-    locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")  # Linux/Mac
-except:
-    try:
-        locale.setlocale(locale.LC_TIME, "Spanish_Spain")  # Windows
-    except:
-        pass
 
 # Número de meses a incluir (ejemplo: 3 = mes actual y 2 anteriores)
 num_meses = 3
@@ -30,60 +20,60 @@ os.makedirs(output_dir, exist_ok=True)
 
 # Encabezados esperados
 headers = [
-    "Entorno", "FECHA", "ProgramID", "TaskID", "MessageID", "MSISDN",
-    "OperatorID", "MOContent1", "ContentType", "CreatedOn",
-    "Cell Number", "CIS", "FECHA DE NACIMIENTO", "TIPO DE CAMPAÑA",
-    "FECHA DE TRABAJO", "ESTATUS", "DETALLES"
+    "Entorno","FECHA","ProgramID","TaskID","MessageID","MSISDN",
+    "OperatorID","MOContent1","ContentType","CreatedOn",
+    "Cell Number","CIS","FECHA DE NACIMIENTO","TIPO DE CAMPAÑA",
+    "FECHA DE TRABAJO","ESTATUS","DETALLES"
 ]
 
-# Traducción Español -> Inglés
-MESES_EN = {
-    "ENERO": "JANUARY",
-    "FEBRERO": "FEBRUARY",
-    "MARZO": "MARCH",
-    "ABRIL": "APRIL",
-    "MAYO": "MAY",
-    "JUNIO": "JUNE",
-    "JULIO": "JULY",
-    "AGOSTO": "AUGUST",
-    "SEPTIEMBRE": "SEPTEMBER",
-    "OCTUBRE": "OCTOBER",
-    "NOVIEMBRE": "NOVEMBER",
-    "DICIEMBRE": "DECEMBER"
-}
+# Meses en Español
+MESES_ES = [
+    "ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO",
+    "JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"
+]
+
+# Meses en Inglés
+MESES_EN = [
+    "JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE",
+    "JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"
+]
 
 # === PROCESO ===
 
 df_final = pd.DataFrame(columns=headers)
 now = datetime.now()
 
-# Lista de meses a procesar
+# Lista de meses a procesar (español e inglés)
 meses_a_incluir = []
 
 for i in range(num_meses):
     fecha_mes = now - relativedelta(months=i)
-    meses_a_incluir.append(
-        (
-            fecha_mes.strftime("%Y"),
-            fecha_mes.strftime("%B").upper()
-        )
-    )
+    indice = fecha_mes.month - 1
 
-print(f"Procesando meses: {meses_a_incluir}")
+    meses_a_incluir.append({
+        "year": str(fecha_mes.year),
+        "months": [
+            MESES_ES[indice],
+            MESES_EN[indice]
+        ]
+    })
+
+print("Procesando meses:")
+for m in meses_a_incluir:
+    print(f"{m['year']} -> {m['months']}")
 
 for entorno, base_path in base_paths.items():
 
-    for year, month in meses_a_incluir:
+    for mes in meses_a_incluir:
 
-        # Buscar primero en español y luego en inglés
-        rutas = [
-            os.path.join(base_path, year, month, "log.csv"),
-            os.path.join(base_path, year, MESES_EN.get(month, month), "log.csv")
-        ]
-
+        year = mes["year"]
         file_path = None
 
-        for ruta in rutas:
+        # Buscar primero español y luego inglés
+        for month in mes["months"]:
+
+            ruta = os.path.join(base_path, year, month, "log.csv")
+
             if os.path.exists(ruta):
                 file_path = ruta
                 break
@@ -98,10 +88,13 @@ for entorno, base_path in base_paths.items():
                     on_bad_lines="skip"
                 )
 
+                # Insertar columna de entorno
                 df.insert(0, "Entorno", entorno)
 
+                # Asignar encabezados
                 df.columns = headers
 
+                # Agregar al dataframe final
                 df_final = pd.concat([df_final, df], ignore_index=True)
 
                 print(f"✔ Procesado: {file_path}")
@@ -110,10 +103,12 @@ for entorno, base_path in base_paths.items():
                 print(f"⚠ Error leyendo {file_path}: {e}")
 
         else:
-            print(f"❌ No existe: {year}/{month} (ni en español ni en inglés)")
+            print(f"❌ No existe el log para {year} ({', '.join(mes['months'])})")
 
-# Nombre dinámico del archivo con rango de meses
-meses_texto = "-".join([m for _, m in meses_a_incluir[::-1]])
+# Nombre del archivo de salida
+meses_texto = "-".join(
+    [m["months"][0] for m in meses_a_incluir[::-1]]
+)
 
 output_file = os.path.join(
     output_dir,
@@ -121,6 +116,10 @@ output_file = os.path.join(
 )
 
 # Guardar CSV final
-df_final.to_csv(output_file, index=False, encoding="utf-8-sig")
+df_final.to_csv(
+    output_file,
+    index=False,
+    encoding="utf-8-sig"
+)
 
 print(f"\n✅ Archivo concentrado generado en: {output_file}")
